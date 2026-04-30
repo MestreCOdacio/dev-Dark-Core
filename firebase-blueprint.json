@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "Character": {
+      "title": "Character",
+      "description": "A Dark Core character sheet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "level": { "type": "number" },
+        "xp": { "type": "number" },
+        "class": { "type": "string" },
+        "ancestry": { "type": "string" },
+        "attributes": { "type": "object" },
+        "advDis": { "type": "object" },
+        "armor": { "type": "object" },
+        "shield": { "type": "object" },
+        "hp": { "type": "object" },
+        "inventory": { "type": "array" },
+        "stress": { "type": "number" },
+        "campaignId": { "type": "string", "description": "ID of the campaign this character belongs to, null if none" }
+      },
+      "required": ["id", "userId", "name", "level", "class", "ancestry"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User identifier mapping",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "6-digit ID" },
+        "nickname": { "type": "string", "description": "Display name of the user" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "A GM lead RPG campaign",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "gmId": { "type": "string" },
+        "playerIds": { "type": "array" },
+        "characterIds": { "type": "array" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "Roll": {
+      "title": "Roll",
+      "description": "A d20 roll log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "characterId": { "type": "string" },
+        "characterName": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "value": { "type": "number" },
+        "modifier": { "type": "number" },
+        "label": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "advantageMode": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Collection of registered 6-digit user IDs"
+    },
+    "characters/{characterId}": {
+      "schema": "Character",
+      "description": "All character sheets across all users"
+    },
+    "campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Campaign data"
+    },
+    "rolls/{rollId}": {
+      "schema": "Roll",
+      "description": "Roll history"
+    }
+  }
+}
