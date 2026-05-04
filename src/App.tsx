@@ -18,12 +18,10 @@ import {
   Sword,
   Swords,
   Target,
-  Brain,
-  Eye,
-  Smile,
-  Dna,
   X,
   Sparkles,
+  Award,
+  Bed,
   ChevronRight,
   History,
   Plus,
@@ -217,7 +215,7 @@ const INITIAL_CHARACTER: Omit<CharacterState, 'id' | 'userId'> = {
 const generateAccessCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
-  for (let i = 0; i < i + 4 && result.length < 4; i++) {
+  for (let i = 0; i < 4; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
@@ -228,8 +226,6 @@ const playDiceSound = () => {
   audio.volume = 0.3;
   audio.play().catch(e => console.log('Audio play failed:', e));
 };
-
-const INITIAL_STATE = INITIAL_CHARACTER;
 
 export default function App() {
   const [view, setView] = useState<'login' | 'player-home' | 'dashboard' | 'create' | 'sheet' | 'gm-dashboard' | 'gm-campaign-list' | 'gm-create' | 'gm-campaign' | 'gm-manage-ids' | 'player-campaign-list' | 'player-campaign' | 'gm-manage-systems' | 'gm-shadowdark-menu' | 'gm-shadowdark-spells'>('login');
@@ -743,7 +739,7 @@ function SpellSelectionModal({ onSelect, onClose }: { onSelect: (spell: Spell) =
 
   const filteredSpells = spells.filter(s => {
     const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = filterType === 'Todos' || (s.type === filterType || (filterType === 'Arcano' && s.type === 'Magia') || (filterType === 'Magia' && s.type === 'Arcano'));
+    const matchesType = filterType === 'Todos' || (Array.isArray(s.type) ? s.type.includes(filterType as any) : (s.type === filterType || (filterType === 'Arcano' && s.type === 'Magia') || (filterType === 'Magia' && s.type === 'Arcano')));
     const matchesTier = filterTier === 'Todos' || s.tier === filterTier;
     return matchesSearch && matchesType && matchesTier;
   });
@@ -836,13 +832,17 @@ function SpellSelectionModal({ onSelect, onClose }: { onSelect: (spell: Spell) =
                    </div>
                    
                    <div className="flex items-center gap-3 mb-3">
-                     <span className={`text-[9px] font-black px-2.5 py-1 rounded-lg border uppercase tracking-tighter ${
-                       spell.type === 'Milagre' ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' :
-                       spell.type === 'Magia Negra' ? 'bg-purple-950/20 border-purple-500/30 text-purple-400' :
-                       'bg-sky-500/10 border-sky-500/30 text-sky-400'
-                     }`}>
-                        {spell.type === 'Magia' ? 'Arcano' : spell.type}
-                     </span>
+                     <div className="flex gap-2">
+                       {(Array.isArray(spell.type) ? spell.type : [spell.type]).map(t => (
+                         <span key={t} className={`text-[9px] font-black px-2.5 py-1 rounded-lg border uppercase tracking-tighter ${
+                           t === 'Milagre' ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' :
+                           t === 'Magia Negra' ? 'bg-purple-950/20 border-purple-500/30 text-purple-400' :
+                           'bg-sky-500/10 border-sky-500/30 text-sky-400'
+                         }`}>
+                            {t === 'Magia' ? 'Arcano' : t}
+                         </span>
+                       ))}
+                     </div>
                      <div className="flex items-center gap-1.5 py-1 px-2.5 bg-zinc-900 border border-zinc-800 rounded-lg">
                         <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest leading-none">Grau {spell.tier}</span>
                      </div>
@@ -1354,8 +1354,28 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
   const updateXP = (amount: number) => {
     if (!character) return;
     const newXP = Math.max(0, Math.min(character.level * 10, character.xp + amount));
+    const realAmount = newXP - character.xp;
+    if (realAmount === 0) return;
+
     setCharacter(prev => prev ? { ...prev, xp: newXP } : null);
     updateCharacterInDB({ xp: newXP });
+
+    // Log XP (if positive)
+    if (realAmount > 0) {
+      const rollRef = doc(collection(db, 'rolls'));
+      setDoc(rollRef, {
+        id: rollRef.id,
+        characterId: charId,
+        characterName: character.name,
+        userId: character.userId,
+        type: 'normal',
+        value: realAmount,
+        modifier: 0,
+        label: `Ganhou ${realAmount} XP`,
+        timestamp: Date.now(),
+        advantageMode: 'none'
+      }).catch(e => console.error("History log failed:", e));
+    }
   };
 
   const levelUp = async () => {
@@ -1366,6 +1386,22 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
     const newLevel = character.level + 1;
     setCharacter(prev => prev ? { ...prev, level: newLevel, xp: 0 } : null);
     await updateCharacterInDB({ level: newLevel, xp: 0 });
+
+    // Log Level Up
+    const rollRef = doc(collection(db, 'rolls'));
+    await setDoc(rollRef, {
+      id: rollRef.id,
+      characterId: charId,
+      characterName: character.name,
+      userId: character.userId,
+      type: 'virtue', 
+      value: newLevel,
+      modifier: 0,
+      label: `Subiu para o Nível ${newLevel}!`,
+      timestamp: Date.now(),
+      advantageMode: 'none'
+    });
+    
     // Artificial delay to prevent rapid-click race conditions during state transition
     await new Promise(resolve => setTimeout(resolve, 500));
   };
@@ -2222,13 +2258,17 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
 
                         <div className="flex flex-col gap-2">
                           <div className="flex items-center gap-2">
-                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded border ${
-                              spell.type === 'Milagre' ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' :
-                              spell.type === 'Magia Negra' ? 'bg-purple-950/20 border-purple-500/30 text-purple-400' :
-                              'bg-sky-500/10 border-sky-500/30 text-sky-400'
-                            }`}>
-                              {spell.type === 'Magia' ? 'Arcano' : spell.type}
-                            </span>
+                            <div className="flex gap-1.5">
+                              {(Array.isArray(spell.type) ? spell.type : [spell.type]).map(t => (
+                                <span key={t} className={`text-[7px] font-black px-1.5 py-0.5 rounded border ${
+                                  t === 'Milagre' ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' :
+                                  t === 'Magia Negra' ? 'bg-purple-950/20 border-purple-500/30 text-purple-400' :
+                                  'bg-sky-500/10 border-sky-500/30 text-sky-400'
+                                }`}>
+                                  {t === 'Magia' ? 'Arcano' : t}
+                                </span>
+                              ))}
+                            </div>
                             <span className="text-[7px] font-black text-zinc-600 uppercase tracking-widest leading-none">Grau {spell.tier}</span>
                           </div>
                           <h4 className="text-lg font-black text-white italic uppercase tracking-tight leading-none group-hover:text-amber-500 transition-colors">{spell.name}</h4>
@@ -3692,9 +3732,9 @@ function CreateCharacterPage({ userId, onCreated, onBack }: {
 }) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<Omit<CharacterState, 'id' | 'userId'>>({
-    ...INITIAL_STATE,
-    attributes: { ...INITIAL_STATE.attributes },
-    hp: { ...INITIAL_STATE.hp }
+    ...INITIAL_CHARACTER,
+    attributes: { ...INITIAL_CHARACTER.attributes },
+    hp: { ...INITIAL_CHARACTER.hp }
   });
 
   const handleCreate = async () => {
@@ -3978,7 +4018,7 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
     tier: 1,
     range: '',
     duration: '',
-    type: 'Arcano',
+    type: ['Arcano'],
     description: ''
   });
 
@@ -4015,7 +4055,7 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
       }
       setIsModalOpen(false);
       setEditingSpell(null);
-      setFormData({ name: '', tier: 1, range: '', duration: '', type: 'Arcano', description: '' });
+      setFormData({ name: '', tier: 1, range: '', duration: '', type: ['Arcano'], description: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'spells');
     }
@@ -4038,9 +4078,7 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
     const matchesSearch = spell.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesTier = tierFilter === 'all' || spell.tier === tierFilter;
     
-    // Treat 'Magia' as 'Arcano' for filtering
-    const effectiveType = spell.type === 'Magia' ? 'Arcano' : spell.type;
-    const matchesType = typeFilter === 'all' || effectiveType === typeFilter;
+    const matchesType = typeFilter === 'all' || (Array.isArray(spell.type) ? spell.type.includes(typeFilter) : spell.type === typeFilter);
     
     return matchesSearch && matchesTier && matchesType;
   });
@@ -4061,7 +4099,7 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
           <button 
             onClick={() => { 
               setEditingSpell(null); 
-              setFormData({ name: '', tier: 1, range: '', duration: '', type: 'Arcano', description: '' }); 
+              setFormData({ name: '', tier: 1, range: '', duration: '', type: ['Arcano'], description: '' }); 
               setIsModalOpen(true); 
             }}
             className="flex items-center justify-center gap-2 px-6 py-4 sm:py-3 bg-amber-600 hover:bg-amber-500 text-white text-[10px] uppercase font-black tracking-widest rounded-xl transition-all active:scale-95"
@@ -4129,15 +4167,23 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
                   onClick={() => setExpandedSpellId(expandedSpellId === spell.id ? null : spell.id)}
                   className="p-6 cursor-pointer flex items-center justify-between gap-4"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs border ${spell.type === 'Arcano' || spell.type === 'Magia' ? 'bg-sky-500/10 border-sky-500/20 text-sky-500' : spell.type === 'Milagre' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 'bg-rose-500/10 border-rose-500/20 text-rose-500'}`}>
-                      {spell.tier}
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs border ${
+                        (Array.isArray(spell.type) ? spell.type : [spell.type]).includes('Milagre') ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 
+                        (Array.isArray(spell.type) ? spell.type : [spell.type]).includes('Magia Negra') ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 
+                        'bg-sky-500/10 border-sky-500/20 text-sky-500'
+                      }`}>
+                        {spell.tier}
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-black italic uppercase tracking-tight text-white">{spell.name}</h3>
+                        <div className="flex gap-2">
+                          {(Array.isArray(spell.type) ? spell.type : [spell.type]).map(t => (
+                            <p key={t} className={`text-[9px] font-black uppercase tracking-[0.2em] ${t === 'Arcano' ? 'text-sky-600' : t === 'Milagre' ? 'text-amber-600' : 'text-rose-600'}`}>{t}</p>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-lg font-black italic uppercase tracking-tight text-white">{spell.name}</h3>
-                      <p className={`text-[9px] font-black uppercase tracking-[0.2em] ${spell.type === 'Arcano' || spell.type === 'Magia' ? 'text-sky-600' : spell.type === 'Milagre' ? 'text-amber-600' : 'text-rose-600'}`}>{spell.type === 'Magia' ? 'Arcano' : spell.type}</p>
-                    </div>
-                  </div>
                   <div className="flex items-center gap-4">
                     <div className="hidden sm:flex flex-col items-end gap-1">
                        <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">{spell.range}</span>
@@ -4177,7 +4223,7 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
                             onClick={(e) => { 
                               e.stopPropagation(); 
                               setEditingSpell(spell); 
-                              setFormData({ ...spell }); 
+                              setFormData({ ...spell, type: Array.isArray(spell.type) ? spell.type : [spell.type] }); 
                               setIsModalOpen(true); 
                             }}
                             className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black uppercase text-zinc-400 hover:text-white hover:border-zinc-700 transition-all"
@@ -4333,8 +4379,17 @@ function ShadowdarkSpellsPage({ onBack }: { onBack: () => void }) {
                         <button
                           key={t}
                           type="button"
-                          onClick={() => setFormData({ ...formData, type: t as any })}
-                          className={`py-4 rounded-2xl border-2 text-[10px] font-black uppercase tracking-widest transition-all ${formData.type === t ? 'bg-amber-600 border-amber-500 text-white scale-[1.02]' : 'bg-zinc-900/50 border-zinc-800/50 text-zinc-500 hover:border-zinc-700'}`}
+                          onClick={() => {
+                            const currentTypes = [...(formData.type as SpellType[])];
+                            if (currentTypes.includes(t as any)) {
+                              if (currentTypes.length > 1) {
+                                setFormData({ ...formData, type: currentTypes.filter(type => type !== t) });
+                              }
+                            } else {
+                              setFormData({ ...formData, type: [...currentTypes, t as any] });
+                            }
+                          }}
+                          className={`py-4 rounded-2xl border-2 text-[10px] font-black uppercase tracking-widest transition-all ${formData.type.includes(t as any) ? 'bg-amber-600 border-amber-500 text-white scale-[1.02]' : 'bg-zinc-900/50 border-zinc-800/50 text-zinc-500 hover:border-zinc-700'}`}
                         >
                           {t}
                         </button>
@@ -4742,6 +4797,72 @@ function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOpenSheet
   
   const [activeMainTab, setActiveMainTab] = useState<'fichas' | 'combate' | 'recursos'>('fichas');
   
+  const [isBulkXPModalOpen, setIsBulkXPModalOpen] = useState(false);
+  const [isBulkRestModalOpen, setIsBulkRestModalOpen] = useState(false);
+  const [bulkXPValue, setBulkXPValue] = useState(0);
+  const [selectedBulkCharIds, setSelectedBulkCharIds] = useState<string[]>([]);
+  
+  const handleBulkXP = async () => {
+    if (bulkXPValue <= 0 || selectedBulkCharIds.length === 0) return;
+    try {
+      const selectedChars = characters.filter(c => selectedBulkCharIds.includes(c.id));
+      for (const char of selectedChars) {
+        await updateDoc(doc(db, 'characters', char.id), { xp: char.xp + bulkXPValue });
+      }
+      
+      // Unified Log
+      const rollRef = doc(collection(db, 'rolls'));
+      await setDoc(rollRef, {
+        id: rollRef.id,
+        characterId: `campaign-${campaignId}`,
+        characterName: 'Mestre',
+        userId: userId || 'gm',
+        type: 'normal',
+        value: bulkXPValue,
+        modifier: 0,
+        label: `Distribuído ${bulkXPValue} XP para: ${selectedChars.map(c => c.name).join(', ')}`,
+        timestamp: Date.now(),
+        advantageMode: 'none'
+      });
+
+      setIsBulkXPModalOpen(false);
+      setBulkXPValue(0);
+      setSelectedBulkCharIds([]);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'characters_bulk_xp');
+    }
+  };
+
+  const handleBulkRest = async () => {
+    if (selectedBulkCharIds.length === 0) return;
+    try {
+      const selectedChars = characters.filter(c => selectedBulkCharIds.includes(c.id));
+      for (const char of selectedChars) {
+        await updateDoc(doc(db, 'characters', char.id), { 'hp.current': char.hp.max });
+      }
+      
+      // Unified Log
+      const rollRef = doc(collection(db, 'rolls'));
+      await setDoc(rollRef, {
+        id: rollRef.id,
+        characterId: `campaign-${campaignId}`,
+        characterName: 'Mestre',
+        userId: userId || 'gm',
+        type: 'normal',
+        value: 0,
+        modifier: 0,
+        label: `Descanso Coletivo realizado para: ${selectedChars.map(c => c.name).join(', ')}`,
+        timestamp: Date.now(),
+        advantageMode: 'none'
+      });
+
+      setIsBulkRestModalOpen(false);
+      setSelectedBulkCharIds([]);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'characters_bulk_rest');
+    }
+  };
+
   const handleAddCharacter = async (charId: string) => {
     try {
       if (!campaign) return;
@@ -4804,7 +4925,7 @@ function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOpenSheet
   const handleClearHistory = async () => {
     if (characters.length === 0) return;
     try {
-      const q = query(collection(db, 'rolls'), where('characterId', 'in', characters.map(c => c.id)));
+      const q = query(collection(db, 'rolls'), where('characterId', 'in', [...characters.map(c => c.id), `campaign-${campaignId}`]));
       const snap = await getDocs(q);
       for (const d of snap.docs) {
         await deleteDoc(d.ref);
@@ -4873,7 +4994,7 @@ function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOpenSheet
         const logs: RollLog[] = [];
         snap.forEach(d => logs.push(d.data() as RollLog));
         return logs
-          .filter(l => characters.some(c => c.id === l.characterId))
+          .filter(l => characters.some(c => c.id === l.characterId) || l.characterId === `campaign-${campaignId}`)
           .sort((a, b) => b.timestamp - a.timestamp);
       });
     }, (err) => console.error("Rolls error:", err));
@@ -5176,8 +5297,29 @@ function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOpenSheet
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="space-y-12"
+                className="space-y-6"
               >
+                {mode === 'gm' && (
+                  <div className="flex justify-end gap-2 px-1">
+                    <button 
+                      onClick={() => { setIsBulkXPModalOpen(true); setSelectedBulkCharIds(characters.map(c => c.id)); }}
+                      className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-600 hover:text-amber-500 hover:border-amber-500/30 transition-all flex items-center gap-2 group"
+                      title="Distribuir XP"
+                    >
+                      <Award size={14} className="group-hover:scale-110 transition-transform" />
+                      <span className="text-[9px] uppercase font-black tracking-widest hidden sm:inline">XP</span>
+                    </button>
+                    <button 
+                      onClick={() => { setIsBulkRestModalOpen(true); setSelectedBulkCharIds(characters.map(c => c.id)); }}
+                      className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-600 hover:text-sky-500 hover:border-sky-500/30 transition-all flex items-center gap-2 group"
+                      title="Descanso Total"
+                    >
+                      <Bed size={14} className="group-hover:scale-110 transition-transform" />
+                      <span className="text-[9px] uppercase font-black tracking-widest hidden sm:inline">Descanso</span>
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {characters.map(char => (
               <div key={char.id} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-6 shadow-2xl relative group overflow-hidden">
@@ -5354,6 +5496,124 @@ function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOpenSheet
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Bulk Action Modals */}
+      <AnimatePresence>
+        {(isBulkXPModalOpen || isBulkRestModalOpen) && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="p-8 border-b border-zinc-900 flex items-center justify-between bg-zinc-950/50 backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-2xl border ${isBulkXPModalOpen ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 'bg-sky-500/10 border-sky-500/20 text-sky-500'}`}>
+                    {isBulkXPModalOpen ? <Award size={24} /> : <Bed size={24} />}
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white uppercase italic tracking-tighter">
+                      {isBulkXPModalOpen ? 'Distribuir Experiência' : 'Descanso Coletivo'}
+                    </h3>
+                    <p className="text-[10px] uppercase font-black text-zinc-500 tracking-widest">
+                      {isBulkXPModalOpen ? 'Aumente o XP de múltiplos personagens' : 'Restaure PV de múltiplos personagens'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => { setIsBulkXPModalOpen(false); setIsBulkRestModalOpen(false); }}
+                  className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white transition-all active:scale-95"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-8 flex-1 overflow-y-auto custom-scrollbar">
+                {isBulkXPModalOpen && (
+                  <div className="space-y-3">
+                    <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1">Quantidade de XP</label>
+                    <div className="relative group">
+                      <input 
+                        type="number"
+                        value={bulkXPValue || ''}
+                        onChange={(e) => setBulkXPValue(Number(e.target.value))}
+                        placeholder="Ex: 5"
+                        className="w-full bg-zinc-900/50 border-2 border-zinc-800/50 rounded-2xl px-6 py-4 text-2xl font-black text-amber-500 outline-none focus:border-amber-500/50 focus:bg-zinc-900 transition-all font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest">Selecionar Fichas</h4>
+                    <button 
+                      onClick={() => {
+                        if (selectedBulkCharIds.length === characters.length) {
+                          setSelectedBulkCharIds([]);
+                        } else {
+                          setSelectedBulkCharIds(characters.map(c => c.id));
+                        }
+                      }}
+                      className="text-[9px] uppercase font-black text-amber-500 hover:text-amber-400 transition-colors tracking-widest"
+                    >
+                      {selectedBulkCharIds.length === characters.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    {characters.map(char => (
+                      <button 
+                        key={char.id}
+                        onClick={() => {
+                          if (selectedBulkCharIds.includes(char.id)) {
+                            setSelectedBulkCharIds(selectedBulkCharIds.filter(id => id !== char.id));
+                          } else {
+                            setSelectedBulkCharIds([...selectedBulkCharIds, char.id]);
+                          }
+                        }}
+                        className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                          selectedBulkCharIds.includes(char.id) 
+                            ? (isBulkXPModalOpen ? 'bg-amber-500/10 border-amber-500/30' : 'bg-sky-500/10 border-sky-500/30')
+                            : 'bg-zinc-900/30 border-zinc-800/50 opacity-40 grayscale'
+                        }`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center font-black text-[10px] text-zinc-500">
+                            {char.level}
+                          </div>
+                          <div className="text-left">
+                            <div className={`text-sm font-black uppercase italic ${selectedBulkCharIds.includes(char.id) ? 'text-white' : 'text-zinc-600'}`}>{char.name}</div>
+                            <div className="text-[8px] uppercase tracking-widest font-black text-zinc-600">{char.class}</div>
+                          </div>
+                        </div>
+                        {selectedBulkCharIds.includes(char.id) && (
+                          <div className={`p-1.5 rounded-lg ${isBulkXPModalOpen ? 'bg-amber-500 text-black' : 'bg-sky-500 text-white'}`}>
+                            <Check size={12} />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-zinc-950/80 border-t border-zinc-900">
+                <button 
+                  onClick={isBulkXPModalOpen ? handleBulkXP : handleBulkRest}
+                  disabled={selectedBulkCharIds.length === 0 || (isBulkXPModalOpen && bulkXPValue <= 0)}
+                  className={`w-full py-5 rounded-2xl font-black uppercase text-xs tracking-[0.3em] transition-all shadow-xl active:scale-95 disabled:opacity-30 disabled:grayscale ${
+                    isBulkXPModalOpen ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/20' : 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-900/20'
+                  }`}
+                >
+                  {isBulkXPModalOpen ? 'Confirmar Distribuição' : 'Confirmar Descanso'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -5913,23 +6173,18 @@ function PlayerHomePage({ userId, profile, onUpdateProfile, onGoToSheets, onGoTo
   const [isEditingName, setIsEditingName] = useState(false);
   const [newNickname, setNewNickname] = useState(profile?.nickname || '');
 
-  const saveNickname = async () => {
-    if (!newNickname.trim()) return;
+  const updateNickname = async (nick: string) => {
+    if (!nick.trim()) return;
     try {
-      const updated = { ...profile, nickname: newNickname.trim(), id: userId, createdAt: profile?.createdAt || new Date().toISOString() } as UserProfile;
+      const updated = { 
+        ...profile, 
+        nickname: nick.trim(), 
+        id: userId, 
+        createdAt: profile?.createdAt || new Date().toISOString() 
+      } as UserProfile;
       await updateDoc(doc(db, 'users', userId), { nickname: updated.nickname });
       onUpdateProfile(updated);
       setIsEditingName(false);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, 'users');
-    }
-  };
-
-  const handleNicknameModalSave = async (nick: string) => {
-    try {
-      const p = { id: userId, nickname: nick, createdAt: profile?.createdAt || new Date().toISOString() };
-      await updateDoc(doc(db, 'users', userId), { nickname: nick });
-      onUpdateProfile(p);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'users');
     }
@@ -5939,7 +6194,7 @@ function PlayerHomePage({ userId, profile, onUpdateProfile, onGoToSheets, onGoTo
     <div className="min-h-screen bg-[#0c0c0e] p-8 flex flex-col justify-center">
       <AnimatePresence>
         {!profile?.nickname && (
-          <PlayerNicknameModal onSave={handleNicknameModalSave} />
+          <PlayerNicknameModal onSave={updateNickname} />
         )}
       </AnimatePresence>
 
@@ -5956,7 +6211,7 @@ function PlayerHomePage({ userId, profile, onUpdateProfile, onGoToSheets, onGoTo
                     className="bg-zinc-950 border border-amber-500/50 rounded-lg px-3 py-1 text-2xl font-black italic uppercase tracking-tighter text-white outline-none w-48"
                     autoFocus
                   />
-                  <button onClick={saveNickname} className="p-2 bg-amber-500/10 text-amber-500 rounded-lg"><Plus size={16} /></button>
+                  <button onClick={() => updateNickname(newNickname)} className="p-2 bg-amber-500/10 text-amber-500 rounded-lg"><Plus size={16} /></button>
                   <button onClick={() => { setIsEditingName(false); setNewNickname(profile?.nickname || ''); }} className="p-2 text-zinc-600"><X size={16} /></button>
                 </div>
               ) : (
