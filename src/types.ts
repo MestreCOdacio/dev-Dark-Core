@@ -3,12 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface Attribute {
-  name: string;
-  label: string;
-  value: number;
-}
-
 export type ArmorType = 'none' | 'leather' | 'chainmail' | 'plate';
 
 export type CharacterClass = 'Guerreiro' | 'Sacerdote' | 'Mago' | 'Ladino' | 'Profanador' | 'Bruxa' | 'Cavaleiro Amaldiçoado' | 'Duelista' | 'Bardo';
@@ -105,7 +99,7 @@ export interface Spell {
   tier: number;
   range: string;
   duration: string;
-  type: SpellType;
+  type: SpellType[];
   description: string;
   createdAt: number;
 }
