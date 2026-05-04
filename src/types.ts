@@ -59,8 +59,25 @@ export interface CharacterState {
     temp: number;
   };
   inventory: InventoryItem[];
+  spells: Spell[];
+  currency: {
+    po: number;
+    pp: number;
+    pc: number;
+  };
+  afflictions: Trait[];
+  virtues: Trait[];
   stress: number;
   virtueMargin?: number;
+}
+
+export interface Trait {
+  id: string;
+  name: string;
+  description: string;
+  roll: number;
+  isAggravated?: boolean;
+  healProgress?: number;
 }
 
 export interface Campaign {
@@ -77,6 +94,20 @@ export interface UserProfile {
   id: string;
   nickname?: string;
   createdAt: string;
+  role?: 'Mestre' | 'Jogador';
+}
+
+export type SpellType = 'Magia' | 'Milagre' | 'Magia Negra' | 'Arcano';
+
+export interface Spell {
+  id: string;
+  name: string;
+  tier: number;
+  range: string;
+  duration: string;
+  type: SpellType;
+  description: string;
+  createdAt: number;
 }
 
 export interface RollLog {

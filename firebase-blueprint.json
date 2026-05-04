@@ -30,7 +30,8 @@
       "properties": {
         "id": { "type": "string", "description": "6-digit ID" },
         "nickname": { "type": "string", "description": "Display name of the user" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "role": { "type": "string", "enum": ["Mestre", "Jogador"] }
       },
       "required": ["id"]
     },
@@ -63,6 +64,22 @@
         "timestamp": { "type": "number" },
         "advantageMode": { "type": "string" }
       }
+    },
+    "Spell": {
+      "title": "Spell",
+      "description": "A Shadowdark RPG spell",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "tier": { "type": "number" },
+        "range": { "type": "string" },
+        "duration": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "name", "tier", "range", "duration", "type", "description"]
     }
   },
   "firestore": {
@@ -81,6 +98,10 @@
     "rolls/{rollId}": {
       "schema": "Roll",
       "description": "Roll history"
+    },
+    "spells/{spellId}": {
+      "schema": "Spell",
+      "description": "Global list of spells for the system"
     }
   }
 }
