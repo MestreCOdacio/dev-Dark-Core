@@ -1351,6 +1351,20 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
     });
   };
 
+  const updateArmor = (updates: Partial<CharacterState['armor']>) => {
+    if (!character) return;
+    const newArmor = { ...character.armor, ...updates };
+    setCharacter(prev => prev ? { ...prev, armor: newArmor } : null);
+    updateCharacterInDB({ armor: newArmor });
+  };
+
+  const updateShield = (updates: Partial<CharacterState['shield']>) => {
+    if (!character) return;
+    const newShield = { ...character.shield, ...updates };
+    setCharacter(prev => prev ? { ...prev, shield: newShield } : null);
+    updateCharacterInDB({ shield: newShield });
+  };
+
   const updateXP = (amount: number) => {
     if (!character) return;
     const newXP = Math.max(0, Math.min(character.level * 10, character.xp + amount));
@@ -2034,7 +2048,7 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
                            <div className="relative flex-1">
                              <select 
                                value={character.armor.type}
-                               onChange={(e) => setCharacter(prev => ({ ...prev, armor: { ...prev.armor, type: e.target.value as ArmorType } }))}
+                               onChange={(e) => updateArmor({ type: e.target.value as ArmorType })}
                                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl px-5 py-4 text-xs font-bold text-white appearance-none cursor-pointer focus:border-amber-500/50 outline-none hover:bg-zinc-900 transition-all shadow-inner"
                              >
                                {(Object.keys(ARMOR_VALUES) as ArmorType[]).map(type => (
@@ -2048,7 +2062,7 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
                                 <label className="text-[8px] uppercase font-black text-zinc-700 ml-1">Magia: </label>
                                 <MagicBonusButton 
                                   value={character.armor.magicBonus} 
-                                  onSelect={(v) => setCharacter(prev => ({ ...prev, armor: { ...prev.armor, magicBonus: v } }))} 
+                                  onSelect={(v) => updateArmor({ magicBonus: v })} 
                                 />
                                 {character.armor.magicBonus > 0 && <span className="text-[10px] font-black text-amber-500">+{character.armor.magicBonus}</span>}
                              </div>
@@ -2074,7 +2088,7 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
                                   <label className="text-[8px] uppercase font-black text-zinc-700 ml-1">Magia: </label>
                                   <MagicBonusButton 
                                     value={character.shield.magicBonus} 
-                                    onSelect={(v) => setCharacter(prev => ({ ...prev, shield: { ...prev.shield, magicBonus: v } }))} 
+                                    onSelect={(v) => updateShield({ magicBonus: v })} 
                                   />
                                   {character.shield.magicBonus > 0 && <span className="text-[10px] font-black text-amber-500">+{character.shield.magicBonus}</span>}
                                </div>
