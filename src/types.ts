@@ -117,6 +117,18 @@ export interface RollLog {
   advantageMode?: 'advantage' | 'disadvantage' | 'none';
 }
 
+export interface RollNotification {
+  id: string;
+  type: 'normal' | 'crit-success' | 'crit-fail' | 'virtue' | 'sanity-success' | 'sanity-fail';
+  value: number;
+  modifier: number;
+  attributeLabel: string;
+  r1?: number;
+  r2?: number;
+  advDis?: 'advantage' | 'disadvantage' | null;
+  timestamp: number;
+}
+
 export const ATTR_LABELS: Record<keyof CharacterState['attributes'], string> = {
   STR: 'Força',
   DEX: 'Destreza',
@@ -125,19 +137,3 @@ export const ATTR_LABELS: Record<keyof CharacterState['attributes'], string> = {
   WIS: 'Sabedoria',
   CHA: 'Carisma',
 };
-
-export function getModifier(value: number): number {
-  if (value <= 3) return -4;
-  if (value <= 5) return -3;
-  if (value <= 7) return -2;
-  if (value <= 9) return -1;
-  if (value <= 11) return 0;
-  if (value <= 13) return 1;
-  if (value <= 15) return 2;
-  if (value <= 17) return 3;
-  return 4;
-}
-
-export function formatModifier(mod: number): string {
-  return mod >= 0 ? `+${mod}` : `${mod}`;
-}
