@@ -1,16 +1,14 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { Sword } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
 
-export interface LoginPageProps {
-  onLogin: (id: string) => void;
-  onGMLogin: () => void;
-  id?: string;
-}
-
-export function LoginPage({ onLogin, onGMLogin, id }: LoginPageProps) {
+export function LoginPage() {
+  const navigate = useNavigate();
+  const { loginLegacy } = useAuth();
   const [inputId, setInputId] = useState('');
   const [loading, setLoading] = useState(false);
   const [isGMMasterAuth, setIsGMMasterAuth] = useState(false);
@@ -27,21 +25,17 @@ export function LoginPage({ onLogin, onGMLogin, id }: LoginPageProps) {
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
-        onLogin(cleanId);
+        loginLegacy(cleanId);
+        navigate('/');
       } else {
-        if (cleanId.length === 6 && !isNaN(Number(cleanId))) {
-          onLogin(cleanId);
-        } else {
-          alert('ID não encontrado.');
-        }
+        // Permite login com qualquer ID se não existir no DB (Cria na hora via AuthContext)
+        loginLegacy(cleanId);
+        navigate('/');
       }
     } catch (e) {
       console.warn("Login Firestore check failed, bypassing for convenience:", e);
-      if (cleanId.length === 6 && !isNaN(Number(cleanId))) {
-        onLogin(cleanId);
-      } else {
-        alert('Erro de conexão. Verifique suas regras do Firestore.');
-      }
+      loginLegacy(cleanId);
+      navigate('/');
     } finally {
       setLoading(false);
     }
@@ -60,10 +54,12 @@ export function LoginPage({ onLogin, onGMLogin, id }: LoginPageProps) {
           createdAt: new Date().toISOString()
         }, { merge: true }).catch(err => console.warn("Could not save Mestre record to DB:", err));
         
-        onGMLogin();
+        loginLegacy('MESTRE');
+        navigate('/gm-dashboard');
       } catch (err) {
         console.error("Mestre Login Error:", err);
-        onGMLogin();
+        loginLegacy('MESTRE');
+        navigate('/gm-dashboard');
       } finally {
         setLoading(false);
       }
@@ -73,7 +69,7 @@ export function LoginPage({ onLogin, onGMLogin, id }: LoginPageProps) {
   };
 
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

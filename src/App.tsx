@@ -90,6 +90,7 @@ import { GMDashboardPage } from './pages/GM/GMDashboardPage';
 import { ManageSystemsPage } from './pages/GM/ManageSystemsPage';
 import { ShadowdarkMenuPage } from './pages/GM/Systems/ShadowdarkMenuPage';
 import { ShadowdarkSpellsPage } from './pages/GM/Systems/ShadowdarkSpellsPage';
+import { ShadowdarkItemsPage } from './pages/GM/Systems/ShadowdarkItemsPage';
 import { GMCampaignListPage } from './pages/GM/Campaigns/GMCampaignListPage';
 import { CreateCampaignPage } from './pages/GM/Campaigns/CreateCampaignPage';
 import { CampaignViewPage } from './pages/Campaign/CampaignViewPage';
@@ -111,7 +112,7 @@ import { StatButton } from './components/character/StatButton';
 import { MagicBonusButton } from './components/character/MagicBonusButton';
 
 export default function App() {
-  const [view, setView] = useState<'login' | 'player-home' | 'dashboard' | 'create' | 'sheet' | 'gm-dashboard' | 'gm-campaign-list' | 'gm-create' | 'gm-campaign' | 'gm-manage-ids' | 'player-campaign-list' | 'player-campaign' | 'gm-manage-systems' | 'gm-shadowdark-menu' | 'gm-shadowdark-spells'>('login');
+  const [view, setView] = useState<'login' | 'player-home' | 'dashboard' | 'create' | 'sheet' | 'gm-dashboard' | 'gm-campaign-list' | 'gm-create' | 'gm-campaign' | 'gm-manage-ids' | 'player-campaign-list' | 'player-campaign' | 'gm-manage-systems' | 'gm-shadowdark-menu' | 'gm-shadowdark-spells' | 'gm-shadowdark-items'>('login');
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('shadowdark_userid'));
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
@@ -184,6 +185,7 @@ export default function App() {
     return (
       <ShadowdarkMenuPage 
         onSelectSpells={() => setView('gm-shadowdark-spells')}
+        onSelectItems={() => setView('gm-shadowdark-items')}
         onBack={() => setView('gm-manage-systems')}
       />
     );
@@ -192,6 +194,14 @@ export default function App() {
   if (view === 'gm-shadowdark-spells') {
     return (
       <ShadowdarkSpellsPage 
+        onBack={() => setView('gm-shadowdark-menu')}
+      />
+    );
+  }
+
+  if (view === 'gm-shadowdark-items') {
+    return (
+      <ShadowdarkItemsPage 
         onBack={() => setView('gm-shadowdark-menu')}
       />
     );

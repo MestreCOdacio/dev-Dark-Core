@@ -1,25 +1,25 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Plus, Map, Users, BookOpen, ChevronRight } from 'lucide-react';
 import { query, collection, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Campaign } from '../../types';
 import { handleFirestoreError, OperationType } from '../../utils/errorUtils';
 import { JoinCampaignModal } from '../../components/modals/JoinCampaignModal';
+import { useAuth } from '../../contexts/AuthContext';
 
-export interface PlayerCampaignListPageProps {
-  userId: string;
-  onSelectCampaign: (id: string) => void;
-  onBack: () => void;
-  id?: string;
-}
-
-export function PlayerCampaignListPage({ userId, onSelectCampaign, onBack, id }: PlayerCampaignListPageProps) {
+export function PlayerCampaignListPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const userId = user?.uid || localStorage.getItem('shadowdark_userid') || '';
+  
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
 
   useEffect(() => {
+    if (!userId) return;
     const q = query(
       collection(db, 'campaigns'),
       where('playerIds', 'array-contains', userId)
@@ -39,12 +39,12 @@ export function PlayerCampaignListPage({ userId, onSelectCampaign, onBack, id }:
   }, [userId]);
 
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] p-8">
+    <div className="min-h-screen bg-[#0c0c0e] p-8">
       <div className="max-w-4xl mx-auto space-y-12">
         <header className="flex items-center justify-between">
           <div className="space-y-1">
             <button 
-              onClick={onBack}
+              onClick={() => navigate('/dashboard')}
               className="flex items-center gap-2 text-zinc-600 hover:text-white transition-colors text-[9px] uppercase font-black tracking-widest mb-1"
             >
               <ChevronLeft size={16} /> Voltar
@@ -66,7 +66,7 @@ export function PlayerCampaignListPage({ userId, onSelectCampaign, onBack, id }:
               userId={userId}
               onJoined={(id) => {
                 setIsJoinModalOpen(false);
-                onSelectCampaign(id);
+                navigate(`/campaign/${id}`);
               }}
               onClose={() => setIsJoinModalOpen(false)}
             />
@@ -91,7 +91,7 @@ export function PlayerCampaignListPage({ userId, onSelectCampaign, onBack, id }:
             {campaigns.map(camp => (
               <button 
                 key={camp.id}
-                onClick={() => onSelectCampaign(camp.id)}
+                onClick={() => navigate(`/campaign/${camp.id}`)}
                 className="w-full text-left group bg-zinc-900 border border-zinc-800 rounded-[32px] p-8 hover:border-amber-500/50 transition-all shadow-2xl relative overflow-hidden"
               >
                 <div className="relative z-10 space-y-4">

@@ -1,21 +1,18 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, User, Plus, Trash2 } from 'lucide-react';
 import { collection, query, where, onSnapshot, updateDoc, doc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db } from '../../../firebase';
 import { Campaign } from '../../../types';
 import { generateAccessCode } from '../../../utils/characterUtils';
 import { handleFirestoreError, OperationType } from '../../../utils/errorUtils';
+import { useAuth } from '../../../contexts/AuthContext';
 
-export interface GMCampaignListPageProps {
-  onSelectCampaign: (id: string) => void;
-  onCreateCampaign: () => void;
-  onBack: () => void;
-  onLogout: () => void;
-  id?: string;
-}
-
-export function GMCampaignListPage({ onSelectCampaign, onCreateCampaign, onBack, onLogout, id }: GMCampaignListPageProps) {
+export function GMCampaignListPage() {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [campToDelete, setCampToDelete] = useState<string | null>(null);
@@ -64,12 +61,18 @@ export function GMCampaignListPage({ onSelectCampaign, onCreateCampaign, onBack,
     }
   };
 
+  const handleLogout = async () => {
+    localStorage.removeItem('shadowdark_userid');
+    await logout();
+    navigate('/login');
+  };
+
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] p-8">
+    <div className="min-h-screen bg-[#0c0c0e] p-8">
       <div className="max-w-4xl mx-auto space-y-12">
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 text-zinc-500 hover:text-white transition-colors">
+            <button onClick={() => navigate('/gm-dashboard')} className="p-2 text-zinc-500 hover:text-white transition-colors">
               <ArrowLeft size={24} />
             </button>
             <div className="space-y-1">
@@ -78,7 +81,7 @@ export function GMCampaignListPage({ onSelectCampaign, onCreateCampaign, onBack,
             </div>
           </div>
           <button 
-            onClick={onLogout}
+            onClick={handleLogout}
             className="text-[10px] uppercase font-black tracking-widest text-zinc-600 hover:text-rose-500 transition-colors flex items-center gap-2"
           >
             Sair <ArrowLeft size={16} />
@@ -87,7 +90,7 @@ export function GMCampaignListPage({ onSelectCampaign, onCreateCampaign, onBack,
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <button 
-            onClick={onCreateCampaign}
+            onClick={() => navigate('/gm/campaigns/create')}
             className="group aspect-[4/5] bg-zinc-900/30 border-2 border-dashed border-zinc-800 rounded-3xl flex flex-col items-center justify-center gap-4 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all text-zinc-600 hover:text-amber-500"
           >
             <div className="w-16 h-16 rounded-full border-2 border-current flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -107,7 +110,7 @@ export function GMCampaignListPage({ onSelectCampaign, onCreateCampaign, onBack,
                 layoutId={camp.id}
                 className="group relative aspect-[4/5] bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-left space-y-6 hover:border-zinc-500 transition-all shadow-2xl overflow-hidden"
               >
-                <div onClick={() => onSelectCampaign(camp.id)} className="absolute inset-0 z-0 cursor-pointer" />
+                <div onClick={() => navigate(`/campaign/${camp.id}`)} className="absolute inset-0 z-0 cursor-pointer" />
                 
                 <div className="absolute top-0 right-0 p-8 text-zinc-800/10 group-hover:text-amber-500/5 transition-colors pointer-events-none">
                   <User size={120} strokeWidth={1} />
@@ -122,7 +125,7 @@ export function GMCampaignListPage({ onSelectCampaign, onCreateCampaign, onBack,
 
                 <div className="absolute bottom-6 left-8 right-8 flex justify-between items-center z-20">
                   <button 
-                     onClick={(e) => { e.stopPropagation(); onSelectCampaign(camp.id); }}
+                     onClick={(e) => { e.stopPropagation(); navigate(`/campaign/${camp.id}`); }}
                      className="text-[10px] font-black uppercase tracking-widest text-zinc-700 hover:text-white transition-colors"
                   >
                     Gerenciar

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, X } from 'lucide-react';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
@@ -8,14 +9,12 @@ import { generateAccessCode } from '../../../utils/characterUtils';
 import { handleFirestoreError, OperationType } from '../../../utils/errorUtils';
 import { UserSearchModal } from '../../../components/modals/UserSearchModal';
 import { CharacterSearchModal } from '../../../components/modals/CharacterSearchModal';
+import { useAuth } from '../../../contexts/AuthContext';
 
-export interface CreateCampaignPageProps {
-  onCreated: (id: string) => void;
-  onBack: () => void;
-  id?: string;
-}
-
-export function CreateCampaignPage({ onCreated, onBack, id }: CreateCampaignPageProps) {
+export function CreateCampaignPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState('');
   const [playerIds, setPlayerIds] = useState<string[]>([]);
@@ -73,7 +72,7 @@ export function CreateCampaignPage({ onCreated, onBack, id }: CreateCampaignPage
         await updateDoc(doc(db, 'characters', charId), { campaignId: campId });
       }
 
-      onCreated(campId);
+      navigate(`/campaign/${campId}`);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'campaigns');
     } finally {
@@ -82,7 +81,7 @@ export function CreateCampaignPage({ onCreated, onBack, id }: CreateCampaignPage
   };
 
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] p-8">
+    <div className="min-h-screen bg-[#0c0c0e] p-8">
       <AnimatePresence>
         {isPlayerSearchOpen && (
           <UserSearchModal onSelect={addPlayerId} onClose={() => setIsPlayerSearchOpen(false)} />
@@ -94,7 +93,7 @@ export function CreateCampaignPage({ onCreated, onBack, id }: CreateCampaignPage
 
       <div className="max-w-2xl mx-auto space-y-8">
         <header className="flex items-center gap-6">
-          <button onClick={onBack} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white transition-all">
+          <button onClick={() => navigate('/gm/campaigns')} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white transition-all">
             <ArrowLeft size={20} />
           </button>
           <div className="space-y-1">

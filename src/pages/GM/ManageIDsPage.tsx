@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
   Trash2, 
@@ -23,7 +24,8 @@ import { db } from '../../firebase';
 import { UserProfile, Campaign } from '../../types';
 import { handleFirestoreError, OperationType } from '../../utils/errorUtils';
 
-export function ManageIDsPage({ onBack }: { onBack: () => void }) {
+export function ManageIDsPage() {
+  const navigate = useNavigate();
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -120,7 +122,7 @@ export function ManageIDsPage({ onBack }: { onBack: () => void }) {
       <div className="max-w-4xl mx-auto space-y-8">
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 text-zinc-500 hover:text-white transition-colors">
+            <button onClick={() => navigate('/gm-dashboard')} className="p-2 text-zinc-500 hover:text-white transition-colors">
               <ArrowLeft size={24} />
             </button>
             <div className="space-y-1">
