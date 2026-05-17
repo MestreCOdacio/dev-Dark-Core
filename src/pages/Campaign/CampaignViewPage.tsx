@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ChevronLeft, 
   History, 
@@ -12,7 +13,8 @@ import {
   Check, 
   ChevronRight, 
   Swords, 
-  Backpack 
+  Backpack,
+  Flame
 } from 'lucide-react';
 import { 
   doc, 
@@ -32,17 +34,66 @@ import { handleFirestoreError, OperationType } from '../../utils/errorUtils';
 import { CharacterSearchModal } from '../../components/modals/CharacterSearchModal';
 import { UserSearchModal } from '../../components/modals/UserSearchModal';
 import { ARMOR_VALUES } from '../../constants';
+import { useAuth } from '../../contexts/AuthContext';
 
-export interface CampaignViewPageProps {
-  campaignId: string;
-  userId: string | null;
-  mode?: 'gm' | 'player';
-  onBack: () => void;
-  onOpenSheet: (id: string) => void;
-  id?: string;
-}
+const formatTime = (seconds: number) => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}`;
+  }
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
 
-export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOpenSheet, id }: CampaignViewPageProps) {
+const CircularProgress = ({ value, max, active }: { value: number, max: number, active: boolean }) => {
+  const radius = 10;
+  const circumference = 2 * Math.PI * radius;
+  const progress = (value / max) * circumference;
+  const dashoffset = circumference - progress;
+
+  return (
+    <div className="flex items-center gap-1.5 bg-zinc-950/50 border border-zinc-800/50 px-2 py-1.5 rounded-xl">
+      <div className="relative w-6 h-6 flex items-center justify-center">
+        <svg className={`w-6 h-6 -rotate-90 ${active ? 'animate-pulse' : ''}`}>
+          <circle
+            cx="12"
+            cy="12"
+            r={radius}
+            className="stroke-zinc-800 fill-none"
+            strokeWidth="2.5"
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r={radius}
+            className="stroke-amber-500 fill-none transition-all duration-300"
+            strokeWidth="2.5"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashoffset}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+           <Flame size={8} className={active ? 'text-amber-500' : 'text-zinc-700'} />
+        </div>
+      </div>
+      <span className={`text-[9px] font-mono font-black ${active ? 'text-amber-500' : 'text-zinc-500'}`}>
+        {formatTime(value)}
+      </span>
+    </div>
+  );
+};
+
+export function CampaignViewPage() {
+  const { id } = useParams<{ id: string }>();
+  const campaignId = id;
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const userId = user?.uid || localStorage.getItem('shadowdark_userid') || null;
+  const isGM = userId === 'MESTRE';
+  const mode = isGM ? 'gm' : 'player';
+
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [characters, setCharacters] = useState<CharacterState[]>([]);
   const [rolls, setRolls] = useState<RollLog[]>([]);
@@ -59,6 +110,54 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   const [sidebarTab, setSidebarTab] = useState<'history' | 'players'>('history');
   
   const [activeMainTab, setActiveMainTab] = useState<'fichas' | 'combate' | 'recursos'>('fichas');
+  const [localLightingState, setLocalLightingState] = useState<Record<string, Record<string, number>>>({});
+  const [timeOffset, setTimeOffset] = useState(0);
+
+  useEffect(() => {
+    // Attempt to sync time with a public API to get server offset
+    const syncTime = async () => {
+      try {
+        const start = Date.now();
+        const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
+        const data = await response.json();
+        const serverTime = new Date(data.utc_datetime).getTime();
+        const end = Date.now();
+        const latency = (end - start) / 2;
+        setTimeOffset(serverTime - (end - latency));
+      } catch (e) {
+        console.warn("Could not sync with server time, using local clock", e);
+      }
+    };
+    syncTime();
+  }, []);
+
+  useEffect(() => {
+    if (characters.length === 0) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now() + timeOffset;
+      const updatedTotal: Record<string, Record<string, number>> = {};
+
+      characters.forEach(char => {
+        const charLighting: Record<string, number> = {};
+        char.inventory?.forEach(item => {
+          if (item.category === 'Iluminação') {
+            if (item.lightIsActive && item.lightStartedAt) {
+              const elapsed = (now - item.lightStartedAt) / 1000;
+              charLighting[item.id] = Math.max(0, (item.lightRemaining || 0) - elapsed);
+            } else {
+              charLighting[item.id] = item.lightRemaining || 0;
+            }
+          }
+        });
+        updatedTotal[char.id] = charLighting;
+      });
+
+      setLocalLightingState(updatedTotal);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [characters, timeOffset]);
   
   const [isBulkXPModalOpen, setIsBulkXPModalOpen] = useState(false);
   const [isBulkRestModalOpen, setIsBulkRestModalOpen] = useState(false);
@@ -66,7 +165,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   const [selectedBulkCharIds, setSelectedBulkCharIds] = useState<string[]>([]);
   
   const handleBulkXP = async () => {
-    if (bulkXPValue <= 0 || selectedBulkCharIds.length === 0) return;
+    if (bulkXPValue <= 0 || selectedBulkCharIds.length === 0 || !campaignId) return;
     try {
       const selectedChars = characters.filter(c => selectedBulkCharIds.includes(c.id));
       for (const char of selectedChars) {
@@ -97,7 +196,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   };
 
   const handleBulkRest = async () => {
-    if (selectedBulkCharIds.length === 0) return;
+    if (selectedBulkCharIds.length === 0 || !campaignId) return;
     try {
       const selectedChars = characters.filter(c => selectedBulkCharIds.includes(c.id));
       for (const char of selectedChars) {
@@ -128,7 +227,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
 
   const handleAddCharacter = async (charId: string) => {
     try {
-      if (!campaign) return;
+      if (!campaign || !campaignId) return;
       const newCharIds = [...campaign.characterIds, charId];
       await updateDoc(doc(db, 'campaigns', campaignId), { characterIds: newCharIds });
       await updateDoc(doc(db, 'characters', charId), { campaignId: campaignId });
@@ -139,7 +238,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   };
 
   const handleRemovePlayer = async () => {
-    if (!removingPlayerId || removeInput !== 'REMOVER') return;
+    if (!removingPlayerId || removeInput !== 'REMOVER' || !campaignId) return;
     try {
       if (!campaign) return;
       const uId = removingPlayerId;
@@ -168,7 +267,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
 
   const handleAddPlayer = async (uId: string) => {
     try {
-      if (!campaign) return;
+      if (!campaign || !campaignId) return;
       
       if (campaign.playerIds.includes(uId)) {
         setRemovingPlayerId(uId);
@@ -186,21 +285,29 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   };
 
   const handleClearHistory = async () => {
-    if (characters.length === 0) return;
+    if (!campaignId) return;
     try {
-      const q = query(collection(db, 'rolls'), where('characterId', 'in', [...characters.map(c => c.id), `campaign-${campaignId}`]));
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        await deleteDoc(d.ref);
+      const allToClearIds = [`campaign-${campaignId}`, ...characters.map(c => c.id)];
+      
+      // Firestore 'in' query limit is 30
+      const CHUNK_SIZE = 10;
+      for (let i = 0; i < allToClearIds.length; i += CHUNK_SIZE) {
+        const chunk = allToClearIds.slice(i, i + CHUNK_SIZE);
+        const q = query(collection(db, 'rolls'), where('characterId', 'in', chunk));
+        const snap = await getDocs(q);
+        for (const d of snap.docs) {
+          await deleteDoc(d.ref);
+        }
       }
+      
       setRolls([]);
     } catch (e) {
-      console.error(e);
+      console.error("Failed to clear campaign history:", e);
     }
   };
 
   const handleRemoveCharacter = async () => {
-    if (!removingCharId || removeInput !== 'REMOVER') return;
+    if (!removingCharId || removeInput !== 'REMOVER' || !campaignId) return;
     try {
       if (!campaign) return;
       const newCharIds = campaign.characterIds.filter(id => id !== removingCharId);
@@ -214,6 +321,8 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   };
 
   useEffect(() => {
+    if (!campaignId) return;
+
     // 1. Fetch Campaign
     const unsubCamp = onSnapshot(doc(db, 'campaigns', campaignId), (docSnap) => {
       if (docSnap.exists()) {
@@ -256,7 +365,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
   }, [campaignId, characters.length]);
 
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] flex flex-col md:flex-row h-screen overflow-hidden">
+    <div className="min-h-screen bg-[#0c0c0e] flex flex-col md:flex-row h-screen overflow-hidden">
       {/* Sidebar: History */}
       <aside className="w-full md:w-80 border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-950/50 flex flex-col order-2 md:order-1 h-full overflow-hidden">
         {/* Tabs */}
@@ -295,7 +404,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
                   {mode === 'gm' && (
                     <button 
                       onClick={handleClearHistory}
-                      className="text-[8px] uppercase font-black tracking-[0.2em] text-zinc-700 hover:text-amber-500 transition-colors"
+                      className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-[7px] uppercase font-black tracking-widest text-zinc-600 hover:text-rose-500 hover:border-rose-500/30 transition-all"
                     >
                       Limpar
                     </button>
@@ -346,7 +455,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
                             roll.type === 'crit-fail' || roll.type === 'sanity-fail' ? 'text-rose-500' : 
                             roll.type === 'virtue' ? 'text-amber-500' : 'text-zinc-200'
                           }`}>
-                            {roll.value + roll.modifier}
+                            {(roll.value || 0) + (roll.modifier || 0)}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-[9px] uppercase font-black text-zinc-500 leading-none truncate">{roll.label}</div>
@@ -435,7 +544,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
           <header className="flex items-center justify-between">
             <div className="space-y-1">
               <button 
-                onClick={onBack}
+                onClick={() => navigate(mode === 'gm' ? '/gm/campaigns' : '/player/campaigns')}
                 className="flex items-center gap-2 text-zinc-600 hover:text-white transition-colors text-[9px] uppercase font-black tracking-widest mb-1"
               >
                 <ChevronLeft size={16} /> Voltar
@@ -579,16 +688,16 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
                             <span className="text-[7px] uppercase font-black text-zinc-600 tracking-tighter leading-none mb-1">C.A.</span>
                             <span className="text-xl font-black font-mono text-zinc-200">{
                               (() => {
-                                 const base = ARMOR_VALUES[char.armor.type as keyof typeof ARMOR_VALUES];
-                                 const dexMod = getModifier(char.attributes.DEX);
+                                 const base = ARMOR_VALUES[char.armor.type as keyof typeof ARMOR_VALUES] || 10;
+                                 const dexMod = getModifier(char.attributes.DEX || 10);
                                  const dexToAdd = char.armor.type === 'plate' ? 0 : dexMod;
-                                 const shieldBonus = char.shield.active ? 2 : 0;
-                                 return base + dexToAdd + shieldBonus + char.armor.magicBonus + char.shield.magicBonus;
+                                 const shieldBonus = char.shield?.active ? 2 : 0;
+                                 return base + dexToAdd + shieldBonus + (char.armor?.magicBonus || 0) + (char.shield?.magicBonus || 0);
                               })()
                             }</span>
                           </div>
                         </div>
-                        
+
                         <div className="absolute top-2 right-2 z-20 flex flex-col items-end gap-2">
                           {mode === 'gm' && (removingCharId === char.id ? (
                             <div className="bg-zinc-950 border border-rose-900/50 p-2 rounded-xl flex items-center gap-2 shadow-2xl">
@@ -687,7 +796,7 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
                         <button 
                           onClick={() => {
                             if (mode === 'gm' || char.userId === userId) {
-                              onOpenSheet(char.id);
+                              navigate(`/character/${char.id}`);
                             }
                           }}
                           disabled={mode === 'player' && char.userId !== userId}
@@ -728,13 +837,67 @@ export function CampaignViewPage({ campaignId, userId, mode = 'gm', onBack, onOp
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex flex-col items-center justify-center py-20 border border-dashed border-zinc-800 rounded-3xl bg-zinc-900/10"
+                className="space-y-6"
               >
-                <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center mb-4 border border-zinc-800">
-                  <Backpack size={32} className="text-zinc-700" />
+                {/* Iluminação Ativa */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-[40px] p-8">
+                   <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center gap-4">
+                         <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 border border-amber-500/20">
+                            <Flame size={24} />
+                         </div>
+                         <h3 className="text-xl font-black italic uppercase tracking-tighter text-white">Iluminação Ativa</h3>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {characters.flatMap(char => 
+                        (char.inventory || [])
+                          .filter(item => item.category === 'Iluminação' && item.lightIsActive)
+                          .map(item => (
+                            <div key={`${char.id}-${item.id}`} className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 flex flex-col gap-4 relative overflow-hidden group hover:border-amber-500/30 transition-all">
+                               <div className="flex items-start justify-between">
+                                  <div className="flex-1 min-w-0">
+                                     <h4 className="text-sm font-black text-white italic uppercase tracking-tight truncate">{item.name}</h4>
+                                     <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">{char.name}</p>
+                                  </div>
+                                  <CircularProgress 
+                                    value={localLightingState[char.id]?.[item.id] ?? item.lightRemaining ?? 0}
+                                    max={item.lightDuration || 3600}
+                                    active={true}
+                                  />
+                               </div>
+                               
+                               <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-900">
+                                  <div 
+                                    className="h-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)] transition-all duration-1000"
+                                    style={{ width: `${Math.max(0, Math.min(100, ((localLightingState[char.id]?.[item.id] ?? 0) / (item.lightDuration || 3600)) * 100))}%` }}
+                                  />
+                               </div>
+                            </div>
+                          ))
+                      )}
+
+                      {characters.every(char => !(char.inventory || []).some(item => item.category === 'Iluminação' && item.lightIsActive)) && (
+                        <div className="col-span-full py-12 flex flex-col items-center justify-center bg-zinc-950/50 border border-zinc-800 border-dashed rounded-3xl">
+                           <Flame size={32} className="text-zinc-800 mb-3" />
+                           <p className="text-xs font-black uppercase tracking-widest text-zinc-600 italic">Nenhuma fonte de luz ativa</p>
+                        </div>
+                      )}
+                   </div>
                 </div>
-                <h3 className="text-xl font-black uppercase italic tracking-tighter text-zinc-500">Gestão de Recursos</h3>
-                <p className="text-zinc-700 text-xs font-bold uppercase tracking-widest mt-1 italic">Em breve no Dark Core</p>
+
+                {/* Futuros Recursos */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <div className="bg-zinc-900 border border-zinc-800 rounded-[40px] p-8 opacity-50">
+                      <h3 className="text-sm font-black italic uppercase tracking-widest text-zinc-500 mb-4">Tesouro da Campanha</h3>
+                      <p className="text-xs text-zinc-600 font-bold uppercase tracking-widest">Em breve: Acompanhamento de loot compartilhado</p>
+                   </div>
+                   <div className="bg-zinc-900 border border-zinc-800 rounded-[40px] p-8 opacity-50">
+                      <h3 className="text-sm font-black italic uppercase tracking-widest text-zinc-500 mb-4">Notas de Grupo</h3>
+                      <p className="text-xs text-zinc-600 font-bold uppercase tracking-widest">Em breve: Bloco de notas para a party</p>
+                   </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

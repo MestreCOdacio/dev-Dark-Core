@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, Map, Plus, X } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -7,48 +8,34 @@ import { UserProfile } from '../../types';
 import { handleFirestoreError, OperationType } from '../../utils/errorUtils';
 import { PlayerNicknameModal } from '../../components/modals/PlayerNicknameModal';
 import { EditIcon } from '../../components/ui/Icons';
+import { useAuth } from '../../contexts/AuthContext';
 
-export interface PlayerHomePageProps {
-  userId: string;
-  profile: UserProfile | null;
-  onUpdateProfile: (p: UserProfile) => void;
-  onGoToSheets: () => void;
-  onGoToCampaigns: () => void;
-  onLogout: () => void;
-  id?: string;
-}
-
-export function PlayerHomePage({ 
-  userId, 
-  profile, 
-  onUpdateProfile, 
-  onGoToSheets, 
-  onGoToCampaigns, 
-  onLogout,
-  id
-}: PlayerHomePageProps) {
+export function PlayerHomePage() {
+  const navigate = useNavigate();
+  const { user, profile, logout, updateProfile } = useAuth();
+  const userId = user?.uid || localStorage.getItem('shadowdark_userid') || '';
+  
   const [isEditingName, setIsEditingName] = useState(false);
   const [newNickname, setNewNickname] = useState(profile?.nickname || '');
 
   const updateNickname = async (nick: string) => {
     if (!nick.trim()) return;
     try {
-      const updated = { 
-        ...profile, 
-        nickname: nick.trim(), 
-        id: userId, 
-        createdAt: profile?.createdAt || new Date().toISOString() 
-      } as UserProfile;
-      await updateDoc(doc(db, 'users', userId), { nickname: updated.nickname });
-      onUpdateProfile(updated);
+      await updateProfile({ nickname: nick.trim() });
       setIsEditingName(false);
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'users');
     }
   };
 
+  const handleLogout = async () => {
+    localStorage.removeItem('shadowdark_userid');
+    await logout();
+    navigate('/login');
+  };
+
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] p-8 flex flex-col justify-center">
+    <div className="min-h-screen bg-[#0c0c0e] p-8 flex flex-col justify-center">
       <AnimatePresence>
         {!profile?.nickname && (
           <PlayerNicknameModal onSave={updateNickname} />
@@ -88,7 +75,7 @@ export function PlayerHomePage({
             <p className="text-zinc-600 text-xs font-bold uppercase tracking-[0.3em] ml-1">ID: <span className="font-mono text-amber-500/80">{userId}</span></p>
           </div>
           <button 
-            onClick={onLogout}
+            onClick={handleLogout}
             className="text-[10px] uppercase font-black tracking-widest text-zinc-600 hover:text-rose-500 transition-colors flex items-center gap-2"
           >
             Sair <ArrowLeft size={16} />
@@ -97,7 +84,7 @@ export function PlayerHomePage({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-96">
           <button 
-            onClick={onGoToSheets}
+            onClick={() => navigate('/dashboard')}
             className="w-full h-full group relative overflow-hidden bg-zinc-900 border border-zinc-800 rounded-[40px] p-12 flex flex-col items-start justify-end gap-2 hover:border-amber-500/50 transition-all shadow-2xl"
           >
             <h2 className="text-5xl font-black italic uppercase tracking-tighter text-white group-hover:scale-105 transition-transform origin-left">Fichas</h2>
@@ -107,7 +94,7 @@ export function PlayerHomePage({
           </button>
 
           <button 
-            onClick={onGoToCampaigns}
+            onClick={() => navigate('/campaigns')}
             className="w-full h-full group relative overflow-hidden bg-zinc-900 border border-zinc-800 rounded-[40px] p-12 flex flex-col items-start justify-end gap-2 hover:border-amber-500/50 transition-all shadow-2xl"
           >
             <h2 className="text-5xl font-black italic uppercase tracking-tighter text-white group-hover:scale-105 transition-transform origin-left">Campanhas</h2>

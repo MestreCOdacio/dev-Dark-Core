@@ -9,14 +9,65 @@ export type CharacterClass = 'Guerreiro' | 'Sacerdote' | 'Mago' | 'Ladino' | 'Pr
 
 export type Ancestry = 'Anão' | 'Goblin' | 'Elfo' | 'Pequenino' | 'Humano' | 'Meio-Orc';
 
+export type ItemCategory = 'Arma' | 'Armadura' | 'Pacote' | 'Geral' | 'Escudo' | 'Iluminação';
+
+export interface MasterItem {
+  id: string;
+  name: string;
+  category: ItemCategory;
+  slots: number;
+  description: string;
+  createdAt: number;
+  // Weapon specific
+  properties?: string[];
+  range?: 'A' | 'P' | 'L' | '';
+  damage?: string;
+  modifiers?: string;
+  // Armor specific
+  ac?: number;
+  sumDex?: boolean;
+  disadvantages?: string[];
+  // Bundle specific
+  itemsPerSlot?: number;
+  // Shield specific or general
+  hands?: number;
+  // Lighting specific
+  lightDuration?: number; // Total duration in seconds
+  lightRemaining?: number; // Initial remaining for the template
+  lightHasFuel?: boolean;
+  lightFuelItemId?: string;
+}
+
 export type ItemType = 'Arma' | 'Item' | 'Proteção' | 'Pacote';
 
 export interface InventoryItem {
   id: string;
+  masterId?: string;
   name: string;
+  category: ItemCategory;
   slots: number;
   description: string;
-  type?: ItemType;
+  // State
+  isEquipped?: boolean;
+  quantity?: number;
+  // Master Item Data Copy
+  properties?: string[];
+  range?: string;
+  damage?: string;
+  modifiers?: string;
+  ac?: number;
+  sumDex?: boolean;
+  disadvantages?: string[];
+  itemsPerSlot?: number;
+  hands?: number;
+  finesseAttribute?: 'STR' | 'DEX';
+  // Lighting specific state
+  lightDuration?: number; // Total duration in seconds
+  lightRemaining?: number; // Remaining duration in seconds
+  lightStartedAt?: number | null; // Timestamp when started
+  lightIsActive?: boolean;
+  lightHasFuel?: boolean;
+  lightFuelItemId?: string;
 }
 
 export interface CharacterState {

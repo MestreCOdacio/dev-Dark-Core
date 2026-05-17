@@ -1,17 +1,14 @@
-import { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Search, ChevronDown, ChevronUp, Settings, Trash2, X } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
 import { Spell, SpellType } from '../../../types';
 import { handleFirestoreError, OperationType } from '../../../utils/errorUtils';
 
-export interface ShadowdarkSpellsPageProps {
-  onBack: () => void;
-  id?: string;
-}
-
-export function ShadowdarkSpellsPage({ onBack, id }: ShadowdarkSpellsPageProps) {
+export function ShadowdarkSpellsPage() {
+  const navigate = useNavigate();
   const [spells, setSpells] = useState<Spell[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -98,11 +95,11 @@ export function ShadowdarkSpellsPage({ onBack, id }: ShadowdarkSpellsPageProps) 
   });
 
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] p-4 sm:p-8 flex flex-col items-center">
+    <div className="min-h-screen bg-[#0c0c0e] p-4 sm:p-8 flex flex-col items-center">
       <div className="max-w-4xl w-full space-y-6 sm:space-y-8">
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4 sm:gap-6">
-            <button onClick={onBack} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-all">
+            <button onClick={() => navigate('/gm/systems/shadowdark')} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-all">
               <ArrowLeft size={20} />
             </button>
             <div>

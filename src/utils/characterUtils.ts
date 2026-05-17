@@ -2,25 +2,44 @@ import { CharacterState } from '../types';
 import { INITIAL_CHARACTER } from '../constants';
 
 export const sanitizeCharacter = (data: any, id: string): CharacterState => {
+  const sanitizeNum = (val: any, fallback = 0) => {
+    const n = Number(val);
+    return isNaN(n) ? fallback : n;
+  };
+
   return {
     ...INITIAL_CHARACTER,
     ...data,
     id,
+    level: sanitizeNum(data.level, 1),
+    xp: sanitizeNum(data.xp, 0),
+    stress: sanitizeNum(data.stress, 0),
     attributes: {
-      ...INITIAL_CHARACTER.attributes,
-      ...(data.attributes || {})
+      STR: sanitizeNum(data.attributes?.STR, 10),
+      DEX: sanitizeNum(data.attributes?.DEX, 10),
+      CON: sanitizeNum(data.attributes?.CON, 10),
+      INT: sanitizeNum(data.attributes?.INT, 10),
+      WIS: sanitizeNum(data.attributes?.WIS, 10),
+      CHA: sanitizeNum(data.attributes?.CHA, 10),
     },
     hp: {
-      ...INITIAL_CHARACTER.hp,
-      ...(data.hp || {})
+      current: sanitizeNum(data.hp?.current, 1),
+      max: sanitizeNum(data.hp?.max, 1),
+      temp: sanitizeNum(data.hp?.temp, 0),
     },
     inventory: data.inventory || [],
     spells: data.spells || [],
     currency: data.currency || { po: 0, pp: 0, pc: 0 },
     afflictions: data.afflictions || [],
     virtues: data.virtues || [],
-    armor: data.armor || { type: 'none', magicBonus: 0 },
-    shield: data.shield || { active: false, magicBonus: 0 },
+    armor: {
+      type: data.armor?.type || 'none',
+      magicBonus: sanitizeNum(data.armor?.magicBonus, 0)
+    },
+    shield: {
+      active: !!data.shield?.active,
+      magicBonus: sanitizeNum(data.shield?.magicBonus, 0)
+    },
     advDis: data.advDis || { ...INITIAL_CHARACTER.advDis }
   };
 };

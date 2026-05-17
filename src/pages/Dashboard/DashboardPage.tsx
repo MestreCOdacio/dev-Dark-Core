@@ -1,35 +1,26 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ArrowLeft, AlertTriangle, X } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { CharacterState } from '../../types';
 import { sanitizeCharacter } from '../../utils/characterUtils';
 import { handleFirestoreError, OperationType } from '../../utils/errorUtils';
+import { useAuth } from '../../contexts/AuthContext';
 
-export interface DashboardPageProps {
-  userId: string;
-  onSelectChar: (id: string) => void;
-  onCreateChar: () => void;
-  onBack?: () => void;
-  onLogout: () => void;
-  id?: string;
-}
-
-export function DashboardPage({ 
-  userId, 
-  onSelectChar, 
-  onCreateChar, 
-  onBack,
-  onLogout,
-  id
-}: DashboardPageProps) {
+export function DashboardPage() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const userId = user?.uid || localStorage.getItem('shadowdark_userid') || '';
+  
   const [characters, setCharacters] = useState<CharacterState[]>([]);
   const [loading, setLoading] = useState(true);
   const [charToDelete, setCharToDelete] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState('');
 
   useEffect(() => {
+    if (!userId) return;
     const q = query(collection(db, 'characters'), where('userId', '==', userId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const chars: CharacterState[] = [];
@@ -58,19 +49,23 @@ export function DashboardPage({
     }
   };
 
+  const handleLogout = async () => {
+    localStorage.removeItem('shadowdark_userid');
+    await logout();
+    navigate('/login');
+  };
+
   return (
-    <div id={id} className="min-h-screen bg-[#0c0c0e] p-8">
+    <div className="min-h-screen bg-[#0c0c0e] p-8">
       <div className="max-w-4xl mx-auto space-y-12">
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            {onBack && (
-              <button 
-                onClick={onBack} 
-                className="flex items-center gap-2 text-zinc-600 hover:text-white transition-colors text-[9px] uppercase font-black tracking-widest"
-              >
-                <ArrowLeft size={16} /> Voltar
-              </button>
-            )}
+            <button 
+              onClick={() => navigate('/')} 
+              className="flex items-center gap-2 text-zinc-600 hover:text-white transition-colors text-[9px] uppercase font-black tracking-widest"
+            >
+              <ArrowLeft size={16} /> Voltar
+            </button>
             <div className="space-y-1">
               <h1 className="text-4xl font-black italic uppercase tracking-tighter text-white">Suas Fichas</h1>
               <div className="flex items-center gap-4">
@@ -82,7 +77,7 @@ export function DashboardPage({
             </div>
           </div>
           <button 
-            onClick={onLogout}
+            onClick={handleLogout}
             className="text-[10px] uppercase font-black tracking-widest text-zinc-600 hover:text-rose-500 transition-colors flex items-center gap-2"
           >
             Sair <ArrowLeft size={16} />
@@ -91,7 +86,7 @@ export function DashboardPage({
 
         <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
           <button 
-            onClick={onCreateChar}
+            onClick={() => navigate('/character/create')}
             disabled={characters.length >= 5}
             className={`group h-32 border-2 border-dashed rounded-3xl flex items-center p-8 gap-6 transition-all ${characters.length >= 5 ? 'bg-zinc-950 border-zinc-900 cursor-not-allowed text-zinc-800' : 'bg-zinc-900/30 border-zinc-800 hover:border-amber-500/50 hover:bg-amber-500/5 text-zinc-600 hover:text-amber-500'}`}
           >
@@ -122,7 +117,7 @@ export function DashboardPage({
                 className="group relative aspect-[4/5] bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-left space-y-6 hover:border-zinc-500 transition-all shadow-2xl overflow-hidden"
               >
                 <div 
-                  onClick={() => onSelectChar(char.id)}
+                  onClick={() => navigate(`/character/${char.id}`)}
                   className="absolute inset-0 z-0 cursor-pointer"
                 />
                 
@@ -146,7 +141,7 @@ export function DashboardPage({
 
                 <div className="pt-4 flex justify-between items-center relative z-10">
                    <button 
-                     onClick={() => onSelectChar(char.id)}
+                     onClick={() => navigate(`/character/${char.id}`)}
                      className="bg-zinc-950 border border-zinc-800 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white transition-all active:scale-95"
                    >
                      Abrir
