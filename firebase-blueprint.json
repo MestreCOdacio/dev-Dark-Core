@@ -80,6 +80,37 @@
         "createdAt": { "type": "number" }
       },
       "required": ["id", "name", "tier", "range", "duration", "type", "description"]
+    },
+    "CampaignNote": {
+      "title": "CampaignNote",
+      "description": "A card note created in a campaign",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "folderId": { "type": "string" },
+        "category": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "campaignId", "title", "content"]
+    },
+    "CampaignFolder": {
+      "title": "CampaignFolder",
+      "description": "A folder to store notes in a campaign",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "campaignId", "name"]
     }
   },
   "firestore": {
@@ -102,6 +133,14 @@
     "spells/{spellId}": {
       "schema": "Spell",
       "description": "Global list of spells for the system"
+    },
+    "campaign_notes/{noteId}": {
+      "schema": "CampaignNote",
+      "description": "Notes made by players or GM in campaigns"
+    },
+    "campaign_folders/{folderId}": {
+      "schema": "CampaignFolder",
+      "description": "Folders/categories to organize notes"
     }
   }
 }

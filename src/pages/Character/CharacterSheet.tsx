@@ -177,12 +177,19 @@ export default function CharacterSheet() {
   const [tempLevel, setTempLevel] = useState<number>(0);
   const [isEditingXP, setIsEditingXP] = useState(false);
   const [tempXP, setTempXP] = useState<number>(0);
+  const [isEditingSpellMod, setIsEditingSpellMod] = useState(false);
+  const [tempSpellMod, setTempSpellMod] = useState<number>(0);
   const [tempHPValue, setTempHPValue] = useState("");
   const [customDice, setCustomDice] = useState<Record<string, number>>({ '4': 0, '6': 0, '8': 0, '10': 0, '12': 0, '20': 0 });
   const [customModifier, setCustomModifier] = useState<number>(0);
   const [isCustomDiceOpen, setIsCustomDiceOpen] = useState(false);
   const [lastCustomResult, setLastCustomResult] = useState<{ rolls: { d: number, v: number }[], total: number } | null>(null);
   const [healingAfflictionId, setHealingAfflictionId] = useState<string | null>(null);
+  const [expandedSpells, setExpandedSpells] = useState<Record<string, boolean>>({});
+
+  const toggleSpellExpanded = (spellId: string) => {
+    setExpandedSpells(prev => ({ ...prev, [spellId]: !prev[spellId] }));
+  };
 
   const spellcasters: CharacterClass[] = ['Sacerdote', 'Mago', 'Bruxa', 'Cavaleiro Amaldiçoado'];
   const isSpellcaster = character ? spellcasters.includes(character.class) : false;
@@ -1285,6 +1292,114 @@ export default function CharacterSheet() {
     }
   };
 
+  const handleSpellRoll = async (spell: Spell) => {
+    if (!character) return;
+    playDiceSound();
+
+    let attrKey: keyof CharacterState['attributes'] = 'INT';
+    let attrLabel = 'Inteligência';
+
+    if (character.class === 'Mago') {
+      attrKey = 'INT';
+      attrLabel = 'Inteligência';
+    } else if (character.class === 'Sacerdote') {
+      attrKey = 'WIS';
+      attrLabel = 'Sabedoria';
+    } else if (character.class === 'Bruxa' || character.class === 'Cavaleiro Amaldiçoado') {
+      attrKey = 'CHA';
+      attrLabel = 'Carisma';
+    }
+
+    const val = character.attributes[attrKey];
+    const mod = getModifier(val);
+    const spellMod = character.spellModifier ?? 0;
+    const totalModifier = mod + spellMod;
+    const targetDC = 10 + spell.tier;
+
+    const advMode = character.advDis[attrKey] || 'none';
+    let diceValue = 0;
+    let r1: number | undefined;
+    let r2: number | undefined;
+
+    if (advMode === 'advantage') {
+      r1 = Math.floor(Math.random() * 20) + 1;
+      r2 = Math.floor(Math.random() * 20) + 1;
+      diceValue = Math.max(r1, r2);
+    } else if (advMode === 'disadvantage') {
+      r1 = Math.floor(Math.random() * 20) + 1;
+      r2 = Math.floor(Math.random() * 20) + 1;
+      diceValue = Math.min(r1, r2);
+    } else {
+      diceValue = Math.floor(Math.random() * 20) + 1;
+    }
+
+    const totalResult = diceValue + totalModifier;
+
+    const isCritSuccess = diceValue === 20;
+    const isCritFail = diceValue === 1;
+
+    let resType: RollNotification['type'] = 'normal';
+    let resTitle = '';
+
+    if (isCritFail) {
+      resType = 'crit-fail';
+      resTitle = 'FALHA CRÍTICA';
+    } else if (isCritSuccess) {
+      resType = 'crit-success';
+      resTitle = 'SUCESSO CRÍTICO';
+    } else if (totalResult >= targetDC) {
+      resType = 'sanity-success';
+      resTitle = 'SUCESSO';
+    } else {
+      resType = 'sanity-fail';
+      resTitle = 'FALHA';
+    }
+
+    const labelStr = `Conjuração: ${spell.name} (${resTitle} - Alvo: ${targetDC})`;
+
+    const newNotify: RollNotification = {
+      id: Math.random().toString(36).substring(2, 11),
+      type: resType,
+      value: diceValue,
+      modifier: totalModifier,
+      attributeLabel: `${attrLabel} [Magia]: ${resTitle}`,
+      r1,
+      r2,
+      advDis: advMode === 'none' ? null : advMode,
+      timestamp: Date.now()
+    };
+
+    setNotifications(prev => [newNotify, ...prev].slice(0, 3));
+
+    if (!charId) return;
+    try {
+      const rollRef = doc(collection(db, 'rolls'));
+      await setDoc(rollRef, {
+        id: rollRef.id,
+        characterId: charId,
+        characterName: character.name,
+        userId: character.userId,
+        type: resType,
+        value: diceValue,
+        modifier: totalModifier,
+        label: labelStr,
+        timestamp: Date.now(),
+        advantageMode: advMode,
+        r1: r1 || null,
+        r2: r2 || null,
+        targetDC,
+        isSpellRoll: true
+      });
+    } catch (e) {
+      console.error("Failed to sync spell roll:", e);
+    }
+
+    // Reset advantage/disadvantage after roll
+    const updatedAdvDis = { ...character.advDis, [attrKey]: null };
+    setCharacter(p => p ? { ...p, advDis: updatedAdvDis } : null);
+    await updateCharacterInDB({ advDis: updatedAdvDis });
+  };
+
   return (
     <div className="min-h-screen bg-[#0c0c0e] pb-32">
       {/* Character Header */}
@@ -2051,25 +2166,170 @@ export default function CharacterSheet() {
                                </button>
                             </div>
 
+                            {/* Modificador de Conjuração Adicional */}
+                            <div className="flex items-center justify-between p-3.5 bg-zinc-950/30 border border-zinc-900/80 rounded-xl mb-2">
+                              <div className="flex flex-col">
+                                <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">Modificador de Conjuração Adicional</h4>
+                                <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest leading-none mt-0.5">Aplicado a rolagens de grimório</p>
+                              </div>
+                              
+                              {isEditingSpellMod ? (
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <input 
+                                    type="number"
+                                    value={tempSpellMod}
+                                    onChange={(e) => setTempSpellMod(parseInt(e.target.value) || 0)}
+                                    className="w-12 bg-zinc-950 border border-amber-500/50 rounded px-2 py-0.5 text-xs font-mono text-center font-black text-white outline-none"
+                                    autoFocus
+                                    onBlur={() => {
+                                      updateCharacterInDB({ spellModifier: tempSpellMod });
+                                      setIsEditingSpellMod(false);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        updateCharacterInDB({ spellModifier: tempSpellMod });
+                                        setIsEditingSpellMod(false);
+                                      }
+                                    }}
+                                  />
+                                  <button 
+                                    type="button"
+                                    onClick={() => {
+                                      updateCharacterInDB({ spellModifier: tempSpellMod });
+                                      setIsEditingSpellMod(false);
+                                    }}
+                                    className="p-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 rounded"
+                                  >
+                                    <Check size={12} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 group/mod">
+                                  <span className="font-mono text-xs font-black text-zinc-300 bg-zinc-950 border border-zinc-900 px-2.5 py-1 rounded-lg">
+                                    {(character.spellModifier ?? 0) >= 0 ? `+${character.spellModifier ?? 0}` : character.spellModifier}
+                                  </span>
+                                  <button 
+                                    type="button"
+                                    onClick={() => {
+                                      setTempSpellMod(character.spellModifier ?? 0);
+                                      setIsEditingSpellMod(true);
+                                    }}
+                                    className="opacity-60 hover:opacity-100 p-1 text-zinc-500 hover:text-amber-500 transition-all"
+                                    title="Editar Modificador"
+                                  >
+                                    <EditIcon size={12} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
                             <div className="grid grid-cols-1 gap-4">
-                               {character.spells.map(spell => (
-                                 <div key={spell.id} className="bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-700 transition-all p-6 relative group">
-                                    <button 
-                                      onClick={() => setSpellToRemove(spell.id)}
-                                      className="absolute top-4 right-4 p-2 text-zinc-800 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                    <div className="flex flex-col gap-2">
-                                       <div className="flex items-center gap-2">
-                                          <span className="text-[8px] font-black bg-amber-500/10 border border-amber-500/30 text-amber-500 px-2 py-0.5 rounded uppercase">Grau {spell.tier}</span>
-                                          <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest italic">{spell.range}</span>
-                                       </div>
-                                       <h4 className="text-lg font-black text-white italic uppercase tracking-tight">{spell.name}</h4>
-                                       <p className="text-[11px] text-zinc-400 leading-relaxed italic">{spell.description}</p>
-                                    </div>
-                                 </div>
-                               ))}
+                               {character.spells.map(spell => {
+                                 const isExpanded = !!expandedSpells[spell.id];
+                                 return (
+                                   <div key={spell.id} className="bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-750 transition-all p-5 relative group">
+                                      <div className="flex flex-col gap-3">
+                                         {/* Header Row */}
+                                         <div className="flex items-center justify-between gap-4">
+                                            <div className="flex items-center gap-2">
+                                               <span className="text-[8px] font-black bg-amber-500/10 border border-amber-500/30 text-amber-500 px-2 py-0.5 rounded uppercase font-mono">Grau {spell.tier}</span>
+                                               <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest italic">{spell.range}</span>
+                                               {spell.duration && (
+                                                 <span className="text-[8px] font-black text-zinc-650 uppercase tracking-widest italic">• {spell.duration}</span>
+                                               )}
+                                            </div>
+
+                                            <div className="flex items-center gap-2 z-10">
+                                               {/* Spell Roll Button */}
+                                               <button
+                                                 type="button"
+                                                 onClick={(e) => {
+                                                   e.stopPropagation();
+                                                   handleSpellRoll(spell);
+                                                 }}
+                                                 className="flex items-center gap-1.5 px-3 py-1 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-amber-500/30 text-amber-500 hover:text-amber-400 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all active:scale-95 shrink-0 shadow-sm"
+                                                 title="Rolar Teste de Conjuração"
+                                               >
+                                                 <D20Icon size={14} />
+                                                 <span>Rolar</span>
+                                               </button>
+
+                                               {/* Delete Button */}
+                                               <button 
+                                                 type="button"
+                                                 onClick={(e) => {
+                                                   e.stopPropagation();
+                                                   setSpellToRemove(spell.id);
+                                                 }}
+                                                 className="p-1 px-2 bg-zinc-900 border border-zinc-800 text-zinc-600 hover:text-rose-500 hover:border-rose-500/20 rounded-xl transition-colors"
+                                                 title="Remover Magia"
+                                               >
+                                                 <Trash2 size={12} />
+                                               </button>
+
+                                               {/* Toggle Collapse Button */}
+                                               <button
+                                                 type="button"
+                                                 onClick={(e) => {
+                                                   e.stopPropagation();
+                                                   toggleSpellExpanded(spell.id);
+                                                 }}
+                                                 className="p-1 text-zinc-600 hover:text-white transition-colors"
+                                               >
+                                                 {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                               </button>
+                                            </div>
+                                         </div>
+
+                                         {/* Body/Title area */}
+                                         <div 
+                                           onClick={() => toggleSpellExpanded(spell.id)}
+                                           className="cursor-pointer space-y-2 select-none"
+                                         >
+                                            <h4 className="text-base font-black text-white italic uppercase tracking-tight hover:text-amber-500 transition-colors flex items-center gap-2">
+                                               {spell.name}
+                                               <span className="text-[10px] font-normal font-sans text-zinc-500 tracking-normal capitalize">
+                                                 (CD {10 + spell.tier})
+                                               </span>
+                                            </h4>
+                                            
+                                            <AnimatePresence initial={false}>
+                                               {isExpanded ? (
+                                                 <motion.div
+                                                   initial={{ height: 0, opacity: 0 }}
+                                                   animate={{ height: "auto", opacity: 1 }}
+                                                   exit={{ height: 0, opacity: 0 }}
+                                                   transition={{ duration: 0.2 }}
+                                                   className="overflow-hidden"
+                                                 >
+                                                    <p className="text-[11px] text-zinc-400 leading-relaxed italic pr-4 pb-2 pt-1">
+                                                      {spell.description}
+                                                    </p>
+                                                    {(() => {
+                                                      const spellTypes = Array.isArray(spell.type) ? spell.type : (spell.type ? [spell.type] : []);
+                                                      if (spellTypes.length === 0) return null;
+                                                      return (
+                                                        <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-zinc-900">
+                                                          {spellTypes.map((t, idx) => (
+                                                            <span key={idx} className="text-[8px] font-black uppercase text-zinc-500 px-1.5 py-0.5 bg-zinc-900 border border-zinc-800/40 rounded">
+                                                              {t}
+                                                            </span>
+                                                          ))}
+                                                        </div>
+                                                      );
+                                                    })()}
+                                                 </motion.div>
+                                               ) : (
+                                                 <p className="text-[11px] text-zinc-500 leading-relaxed italic truncate max-w-[90%]">
+                                                    {spell.description}
+                                                 </p>
+                                               )}
+                                            </AnimatePresence>
+                                         </div>
+                                      </div>
+                                   </div>
+                                 );
+                               })}
                                {character.spells.length === 0 && (
                                  <div className="py-12 text-center text-zinc-600 border border-dashed border-zinc-800 rounded-2xl">
                                     <p className="text-[10px] uppercase font-black tracking-widest">Nenhuma magia aprendida</p>

@@ -114,6 +114,7 @@ export interface CharacterState {
   virtues: Trait[];
   stress: number;
   virtueMargin?: number;
+  spellModifier?: number;
 }
 
 export interface Trait {
@@ -133,6 +134,27 @@ export interface Campaign {
   characterIds: string[];
   createdAt: string;
   accessCode?: string;
+}
+
+export interface CampaignNote {
+  id: string;
+  campaignId: string;
+  title: string;
+  content: string;
+  folderId: string | null;
+  category: string;
+  authorId: string;
+  authorName: string;
+  authorRole: 'Mestre' | 'Jogador';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CampaignFolder {
+  id: string;
+  campaignId: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface UserProfile {
