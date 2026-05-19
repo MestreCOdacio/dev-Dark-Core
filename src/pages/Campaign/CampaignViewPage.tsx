@@ -134,6 +134,24 @@ export function CampaignViewPage() {
     "fichas" | "combate" | "recursos" | "anotacoes"
   >("fichas");
   const [mobileTab, setMobileTab] = useState<"fichas" | "historico">("fichas");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem("shadowdark_sidebar_collapsed") === "true";
+  });
+  const [hasNewRolls, setHasNewRolls] = useState<boolean>(false);
+
+  const isSidebarCollapsedRef = React.useRef(isSidebarCollapsed);
+  const mobileTabRef = React.useRef(mobileTab);
+  const isFirstRollLoadRef = React.useRef(true);
+  const seenRollIdsRef = React.useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    isSidebarCollapsedRef.current = isSidebarCollapsed;
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    mobileTabRef.current = mobileTab;
+  }, [mobileTab]);
+
   const [localLightingState, setLocalLightingState] = useState<
     Record<string, Record<string, number>>
   >({});
@@ -424,7 +442,9 @@ export function CampaignViewPage() {
       qRolls,
       (snap) => {
         const allLogs: RollLog[] = [];
-        snap.forEach((d) => allLogs.push(d.data() as RollLog));
+        snap.forEach((d) => {
+          allLogs.push({ id: d.id, ...d.data() } as RollLog);
+        });
 
         const filtered = allLogs
           .filter(
@@ -434,7 +454,28 @@ export function CampaignViewPage() {
           )
           .sort((a, b) => b.timestamp - a.timestamp);
 
+        let hasNew = false;
+        if (!isFirstRollLoadRef.current) {
+          const isRetracted = isSidebarCollapsedRef.current || mobileTabRef.current === "fichas";
+          filtered.forEach((roll) => {
+            if (!seenRollIdsRef.current.has(roll.id)) {
+              seenRollIdsRef.current.add(roll.id);
+              if (isRetracted) {
+                hasNew = true;
+              }
+            }
+          });
+        } else {
+          filtered.forEach((roll) => {
+            seenRollIdsRef.current.add(roll.id);
+          });
+          isFirstRollLoadRef.current = false;
+        }
+
         setRolls(filtered);
+        if (hasNew) {
+          setHasNewRolls(true);
+        }
       },
       (err) => console.error("Rolls error:", err),
     );
@@ -449,34 +490,99 @@ export function CampaignViewPage() {
   return (
     <div className="min-h-screen bg-[#0c0c0e] flex flex-col md:flex-row h-screen overflow-hidden">
       {/* Sidebar: History */}
-      <aside className={`w-full md:w-80 border-b md:border-b-0 md:border-r border-zinc-800 bg-[#09090b] flex-col order-2 md:order-1 h-full overflow-hidden ${mobileTab === "historico" ? "flex" : "hidden md:flex"}`}>
-        {/* Tabs */}
-        <div className="flex border-b border-zinc-900">
-          <button
-            onClick={() => setSidebarTab("history")}
-            className={`flex-1 py-4 text-[10px] uppercase font-black tracking-widest transition-all relative ${sidebarTab === "history" ? "text-amber-500 bg-zinc-900/50" : "text-zinc-600 hover:text-zinc-400"}`}
-          >
-            Histórico
-            {sidebarTab === "history" && (
-              <motion.div
-                layoutId="sidebarTab"
-                className="absolute bottom-0 inset-x-0 h-0.5 bg-amber-500"
-              />
-            )}
-          </button>
-          <button
-            onClick={() => setSidebarTab("players")}
-            className={`flex-1 py-4 text-[10px] uppercase font-black tracking-widest transition-all relative ${sidebarTab === "players" ? "text-amber-500 bg-zinc-900/50" : "text-zinc-600 hover:text-zinc-400"}`}
-          >
-            Jogadores
-            {sidebarTab === "players" && (
-              <motion.div
-                layoutId="sidebarTab"
-                className="absolute bottom-0 inset-x-0 h-0.5 bg-amber-500"
-              />
-            )}
-          </button>
-        </div>
+      <aside className={`w-full border-b md:border-b-0 md:border-r border-zinc-800 bg-[#09090b] flex flex-col order-2 md:order-1 h-full overflow-hidden transition-all duration-300 ${isSidebarCollapsed ? "md:w-16" : "md:w-80"} ${mobileTab === "historico" ? "flex" : "hidden md:flex"}`}>
+        {isSidebarCollapsed ? (
+          /* Collapsed Sidebar on Desktop */
+          <div className="hidden md:flex flex-col items-center h-full py-4 gap-6 select-none">
+            {/* Expand Button */}
+            <button
+              onClick={() => {
+                setIsSidebarCollapsed(false);
+                localStorage.setItem("shadowdark_sidebar_collapsed", "false");
+                setHasNewRolls(false);
+              }}
+              className="p-3 text-zinc-500 hover:text-white hover:bg-zinc-900/50 rounded-xl transition-all cursor-pointer relative"
+              title="Expandir Menu"
+            >
+              <ChevronRight size={18} />
+            </button>
+            
+            <div className="w-full h-[1px] bg-zinc-900" />
+            
+            {/* History Toggle Button */}
+            <button
+              onClick={() => {
+                setIsSidebarCollapsed(false);
+                localStorage.setItem("shadowdark_sidebar_collapsed", "false");
+                setSidebarTab("history");
+                setHasNewRolls(false);
+              }}
+              className="relative p-3.5 hover:bg-zinc-900/50 rounded-xl transition-all cursor-pointer group"
+              title="Histórico"
+            >
+              <History size={18} className={sidebarTab === "history" ? "text-amber-500" : "text-zinc-500 group-hover:text-zinc-200"} />
+              {hasNewRolls && (
+                <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse border-2 border-zinc-950" />
+              )}
+            </button>
+
+            {/* Players Toggle Button */}
+            <button
+              onClick={() => {
+                setIsSidebarCollapsed(false);
+                localStorage.setItem("shadowdark_sidebar_collapsed", "false");
+                setSidebarTab("players");
+                setHasNewRolls(false);
+              }}
+              className="p-3.5 hover:bg-zinc-900/50 rounded-xl transition-all cursor-pointer group"
+              title="Jogadores"
+            >
+              <Users size={18} className={sidebarTab === "players" ? "text-amber-500" : "text-zinc-500 group-hover:text-zinc-200"} />
+            </button>
+          </div>
+        ) : null}
+
+        <div className={`flex-1 flex flex-col h-full ${isSidebarCollapsed ? "md:hidden" : "flex"}`}>
+          {/* Tabs */}
+          <div className="flex border-b border-zinc-900 justify-between items-center px-1">
+            <div className="flex flex-1">
+              <button
+                onClick={() => setSidebarTab("history")}
+                className={`flex-1 py-4 text-[10px] uppercase font-black tracking-widest transition-all relative ${sidebarTab === "history" ? "text-amber-500 bg-zinc-900/50" : "text-zinc-600 hover:text-zinc-400"}`}
+              >
+                Histórico
+                {sidebarTab === "history" && (
+                  <motion.div
+                    layoutId="sidebarTab"
+                    className="absolute bottom-0 inset-x-0 h-0.5 bg-amber-500"
+                  />
+                )}
+              </button>
+              <button
+                onClick={() => setSidebarTab("players")}
+                className={`flex-1 py-4 text-[10px] uppercase font-black tracking-widest transition-all relative ${sidebarTab === "players" ? "text-amber-500 bg-zinc-900/50" : "text-zinc-600 hover:text-zinc-400"}`}
+              >
+                Jogadores
+                {sidebarTab === "players" && (
+                  <motion.div
+                    layoutId="sidebarTab"
+                    className="absolute bottom-0 inset-x-0 h-0.5 bg-amber-500"
+                  />
+                )}
+              </button>
+            </div>
+            
+            <button
+              onClick={() => {
+                setIsSidebarCollapsed(true);
+                localStorage.setItem("shadowdark_sidebar_collapsed", "true");
+              }}
+              className="hidden md:flex p-2 text-zinc-600 hover:text-white rounded-lg hover:bg-zinc-900/50 transition-colors ml-1 cursor-pointer mr-1"
+              title="Retrair Menu"
+            >
+              <ChevronLeft size={16} />
+            </button>
+          </div>
 
         <div className="flex-1 overflow-y-auto p-6 pb-24 md:pb-6 scrollbar-hide">
           <AnimatePresence mode="wait">
@@ -688,6 +794,7 @@ export function CampaignViewPage() {
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
         </div>
       </aside>
 
@@ -1279,14 +1386,20 @@ export function CampaignViewPage() {
           Campanha
         </button>
         <button
-          onClick={() => setMobileTab("historico")}
-          className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+          onClick={() => {
+            setMobileTab("historico");
+            setHasNewRolls(false);
+          }}
+          className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer relative ${
             mobileTab === "historico"
               ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20"
               : "text-zinc-500 hover:text-white"
           }`}
         >
           Histórico ({rolls.length})
+          {hasNewRolls && mobileTab === "fichas" && (
+            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse border-2 border-zinc-950" />
+          )}
         </button>
       </div>
 
