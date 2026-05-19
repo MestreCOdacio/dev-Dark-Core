@@ -133,6 +133,7 @@ export function CampaignViewPage() {
   const [activeMainTab, setActiveMainTab] = useState<
     "fichas" | "combate" | "recursos" | "anotacoes"
   >("fichas");
+  const [mobileTab, setMobileTab] = useState<"fichas" | "historico">("fichas");
   const [localLightingState, setLocalLightingState] = useState<
     Record<string, Record<string, number>>
   >({});
@@ -448,7 +449,7 @@ export function CampaignViewPage() {
   return (
     <div className="min-h-screen bg-[#0c0c0e] flex flex-col md:flex-row h-screen overflow-hidden">
       {/* Sidebar: History */}
-      <aside className="w-full md:w-80 border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-950/50 flex flex-col order-2 md:order-1 h-full overflow-hidden">
+      <aside className={`w-full md:w-80 border-b md:border-b-0 md:border-r border-zinc-800 bg-[#09090b] flex-col order-2 md:order-1 h-full overflow-hidden ${mobileTab === "historico" ? "flex" : "hidden md:flex"}`}>
         {/* Tabs */}
         <div className="flex border-b border-zinc-900">
           <button
@@ -477,7 +478,7 @@ export function CampaignViewPage() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+        <div className="flex-1 overflow-y-auto p-6 pb-24 md:pb-6 scrollbar-hide">
           <AnimatePresence mode="wait">
             {sidebarTab === "history" && (
               <motion.div
@@ -691,7 +692,7 @@ export function CampaignViewPage() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-8 order-1 md:order-2 overflow-y-auto">
+      <main className={`flex-1 p-4 md:p-8 pb-24 md:pb-8 order-1 md:order-2 overflow-y-auto ${mobileTab === "fichas" ? "block" : "hidden md:block"}`}>
         <div className="max-w-6xl mx-auto space-y-12">
           <header className="flex items-center justify-between">
             <div className="space-y-1">
@@ -726,7 +727,7 @@ export function CampaignViewPage() {
             </div>
           </header>
 
-          <div className="flex gap-8 border-b border-zinc-900">
+          <div className="flex gap-4 sm:gap-8 border-b border-zinc-900 overflow-x-auto scrollbar-hide py-1">
             <button
               onClick={() => setActiveMainTab("fichas")}
               className={`pb-4 px-2 text-xs uppercase font-black tracking-widest transition-all relative ${activeMainTab === "fichas" ? "text-amber-500" : "text-zinc-600 hover:text-zinc-400"}`}
@@ -1264,6 +1265,30 @@ export function CampaignViewPage() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Selector de Abas Mobile */}
+      <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-zinc-950/90 backdrop-blur-md border border-zinc-800/80 px-2 py-1.5 rounded-full shadow-[0_8px_32px_rgba(0,0,0,0.8)] flex items-center gap-1">
+        <button
+          onClick={() => setMobileTab("fichas")}
+          className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+            mobileTab === "fichas"
+              ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20"
+              : "text-zinc-500 hover:text-white"
+          }`}
+        >
+          Campanha
+        </button>
+        <button
+          onClick={() => setMobileTab("historico")}
+          className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+            mobileTab === "historico"
+              ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20"
+              : "text-zinc-500 hover:text-white"
+          }`}
+        >
+          Histórico ({rolls.length})
+        </button>
+      </div>
 
       {/* Bulk Action Modals */}
       <AnimatePresence>

@@ -822,7 +822,7 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
 
   const updateXP = (amount: number) => {
     if (!character) return;
-    const newXP = Math.max(0, Math.min(character.level * 10, character.xp + amount));
+    const newXP = Math.max(0, character.xp + amount);
     const realAmount = newXP - character.xp;
     if (realAmount === 0) return;
 
@@ -853,8 +853,9 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
     if (character.xp < maxXPNeeded) return;
     
     const newLevel = character.level + 1;
-    setCharacter(prev => prev ? { ...prev, level: newLevel, xp: 0 } : null);
-    await updateCharacterInDB({ level: newLevel, xp: 0 });
+    const remainingXP = Math.max(0, character.xp - maxXPNeeded);
+    setCharacter(prev => prev ? { ...prev, level: newLevel, xp: remainingXP } : null);
+    await updateCharacterInDB({ level: newLevel, xp: remainingXP });
 
     // Log Level Up
     const rollRef = doc(collection(db, 'rolls'));

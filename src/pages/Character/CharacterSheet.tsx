@@ -1128,7 +1128,7 @@ export default function CharacterSheet() {
 
   const updateXP = (amount: number) => {
     if (!character) return;
-    const newXP = Math.max(0, Math.min(character.level * 10, character.xp + amount));
+    const newXP = Math.max(0, character.xp + amount);
     setCharacter(prev => prev ? { ...prev, xp: newXP } : null);
     updateCharacterInDB({ xp: newXP });
   };
@@ -1139,8 +1139,9 @@ export default function CharacterSheet() {
     if (character.xp < maxXPNeeded) return;
 
     const newLevel = character.level + 1;
-    setCharacter(prev => prev ? { ...prev, level: newLevel, xp: 0 } : null);
-    await updateCharacterInDB({ level: newLevel, xp: 0 });
+    const remainingXP = Math.max(0, character.xp - maxXPNeeded);
+    setCharacter(prev => prev ? { ...prev, level: newLevel, xp: remainingXP } : null);
+    await updateCharacterInDB({ level: newLevel, xp: remainingXP });
     setIsLevelingUp(true);
   };
 
@@ -1733,44 +1734,82 @@ export default function CharacterSheet() {
             {/* Quick Stats Bar */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                {/* Nível */}
-               <div className="bg-zinc-900 border border-zinc-800 rounded-[32px] p-6 group hover:border-amber-500/30 transition-all relative overflow-hidden">
-                  <h3 className="text-[10px] uppercase tracking-[0.3em] text-zinc-500 font-black mb-1">Nível</h3>
-                  {isGM && isEditingLevel ? (
-                    <div className="flex items-center gap-2">
-                       <input 
-                         type="number"
-                         value={tempLevel}
-                         onChange={(e) => setTempLevel(parseInt(e.target.value) || 0)}
-                         className="w-20 bg-zinc-950 border border-amber-500/50 rounded-lg px-2 py-1 text-2xl font-black text-white outline-none"
-                         autoFocus
-                       />
-                       <button 
-                         onClick={() => {
-                           updateCharacterInDB({ level: tempLevel });
-                           setIsEditingLevel(false);
-                         }}
-                         className="p-2 bg-amber-500/10 text-amber-500 rounded-xl"
-                       >
-                         <Check size={20} />
-                       </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 group/lvl">
-                       <div className="text-3xl font-black text-white italic leading-none">{character.level.toString().padStart(2, '0')}</div>
-                       {isGM && (
+               {character.xp >= maxXP ? (
+                 <button
+                   onClick={async () => {
+                     if (isLevelingUp) return;
+                     setIsLevelingUp(true);
+                     await levelUp();
+                     setIsLevelingUp(false);
+                   }}
+                   disabled={isLevelingUp}
+                   className="w-full text-left bg-gradient-to-br from-amber-500/20 to-zinc-900 border-2 border-amber-500 rounded-[32px] p-6 transition-all relative overflow-hidden cursor-pointer shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_25px_rgba(245,158,11,0.45)] hover:border-amber-400 active:scale-[0.98] group shrink-0"
+                 >
+                   <div className="absolute inset-0 bg-amber-500/5 group-hover:bg-amber-500/10 transition-colors animate-pulse" />
+                   
+                   <div className="relative z-10 flex flex-col justify-between h-full">
+                     <div className="flex justify-between items-start">
+                       <h3 className="text-[10px] uppercase tracking-[0.3em] text-amber-500 font-extrabold mb-1">
+                         Subir de Nível!
+                       </h3>
+                       <span className="bg-amber-500 text-black text-[8px] font-black uppercase px-2 py-0.5 rounded-full tracking-wider animate-bounce">
+                         Pronto
+                       </span>
+                     </div>
+                     <div className="flex items-baseline gap-2 mt-2">
+                       <div className="text-3xl font-black text-white italic leading-none">
+                         Nível {character.level.toString().padStart(2, '0')}
+                       </div>
+                       <span className="text-amber-500 text-lg font-black italic">→</span>
+                       <span className="text-amber-400 text-3xl font-black italic leading-none">
+                         {(character.level + 1).toString().padStart(2, '0')}
+                       </span>
+                     </div>
+                     <span className="text-[8px] text-zinc-400 font-black tracking-widest mt-3 uppercase">
+                       Clique para Confirmar
+                     </span>
+                   </div>
+                 </button>
+               ) : (
+                 <div className="bg-zinc-900 border border-zinc-800 rounded-[32px] p-6 group hover:border-amber-500/30 transition-all relative overflow-hidden">
+                    <h3 className="text-[10px] uppercase tracking-[0.3em] text-zinc-500 font-black mb-1">Nível</h3>
+                    {isGM && isEditingLevel ? (
+                      <div className="flex items-center gap-2">
+                         <input 
+                           type="number"
+                           value={tempLevel}
+                           onChange={(e) => setTempLevel(parseInt(e.target.value) || 0)}
+                           className="w-20 bg-zinc-950 border border-amber-500/50 rounded-lg px-2 py-1 text-2xl font-black text-white outline-none"
+                           autoFocus
+                         />
                          <button 
                            onClick={() => {
-                             setTempLevel(character.level);
-                             setIsEditingLevel(true);
+                             updateCharacterInDB({ level: tempLevel });
+                             setIsEditingLevel(false);
                            }}
-                           className="opacity-0 group-hover/lvl:opacity-100 p-1 text-zinc-700 hover:text-amber-500 transition-all"
+                           className="p-2 bg-amber-500/10 text-amber-500 rounded-xl"
                          >
-                           <EditIcon size={16} />
+                           <Check size={20} />
                          </button>
-                       )}
-                    </div>
-                  )}
-               </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 group/lvl">
+                         <div className="text-3xl font-black text-white italic leading-none">{character.level.toString().padStart(2, '0')}</div>
+                         {isGM && (
+                           <button 
+                             onClick={() => {
+                               setTempLevel(character.level);
+                               setIsEditingLevel(true);
+                             }}
+                             className="opacity-0 group-hover/lvl:opacity-100 p-1 text-zinc-700 hover:text-amber-500 transition-all"
+                           >
+                             <EditIcon size={16} />
+                           </button>
+                         )}
+                      </div>
+                    )}
+                 </div>
+               )}
                
                {/* Defesa */}
                <div className="bg-zinc-900 border border-zinc-800 rounded-[32px] p-6 group hover:border-sky-500/30 transition-all relative overflow-hidden">
