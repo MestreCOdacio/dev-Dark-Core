@@ -30,8 +30,13 @@ export const sanitizeCharacter = (data: any, id: string): CharacterState => {
     inventory: data.inventory || [],
     spells: data.spells || [],
     currency: data.currency || { po: 0, pp: 0, pc: 0 },
-    afflictions: data.afflictions || [],
-    virtues: data.virtues || [],
+    afflictions: (data.afflictions || []).filter((a: any) => 
+      [
+        "Mãos Trêmulas", "Visão de Túnel", "Paranoia", "Pânico Devastador", "Bloqueio Mental", "Desespero",
+        "Paralisia do Medo", "Frenesi Cego", "Obsessão pela Tocha", "Rachadura Psíquica"
+      ].includes(a.name)
+    ),
+    virtues: [],
     armor: {
       type: data.armor?.type || 'none',
       magicBonus: sanitizeNum(data.armor?.magicBonus, 0)

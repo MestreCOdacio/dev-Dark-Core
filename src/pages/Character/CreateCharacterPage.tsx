@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { CharacterState, CharacterClass, Ancestry, ATTR_LABELS } from '../../types';
 import { INITIAL_CHARACTER, CLASSES, ANCESTRIES } from '../../constants';
@@ -15,11 +15,31 @@ export function CreateCharacterPage() {
   const userId = user?.uid || localStorage.getItem('shadowdark_userid') || '';
   
   const [loading, setLoading] = useState(false);
+  const [customClasses, setCustomClasses] = useState<string[]>([]);
   const [formData, setFormData] = useState<Omit<CharacterState, 'id' | 'userId'>>({
     ...INITIAL_CHARACTER,
     attributes: { ...INITIAL_CHARACTER.attributes },
     hp: { ...INITIAL_CHARACTER.hp }
   });
+
+  useEffect(() => {
+    const q = query(collection(db, 'master_classes'), orderBy('name', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: string[] = [];
+      snapshot.forEach(docSnap => {
+        const d = docSnap.data();
+        if (d.name) {
+          list.push(d.name);
+        }
+      });
+      setCustomClasses(list);
+    }, (e) => {
+      console.error(e);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const availableClasses = [...CLASSES, ...customClasses];
 
   const handleCreate = async () => {
     if (!formData.name.trim()) return;
@@ -100,7 +120,7 @@ export function CreateCharacterPage() {
                     onChange={(e) => setFormData(prev => ({ ...prev, class: e.target.value as CharacterClass }))}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-4 text-sm font-bold text-white appearance-none outline-none focus:border-amber-500/50 transition-all cursor-pointer"
                   >
-                    {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {availableClasses.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600" size={16} />
                 </div>

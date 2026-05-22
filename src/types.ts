@@ -5,7 +5,7 @@
 
 export type ArmorType = 'none' | 'leather' | 'chainmail' | 'plate';
 
-export type CharacterClass = 'Guerreiro' | 'Sacerdote' | 'Mago' | 'Ladino' | 'Profanador' | 'Bruxa' | 'Cavaleiro Amaldiçoado' | 'Duelista' | 'Bardo';
+export type CharacterClass = string;
 
 export type Ancestry = 'Anão' | 'Goblin' | 'Elfo' | 'Pequenino' | 'Humano' | 'Meio-Orc';
 
@@ -115,6 +115,7 @@ export interface CharacterState {
   stress: number;
   virtueMargin?: number;
   spellModifier?: number;
+  talentUses?: Record<string, number>;
 }
 
 export interface Trait {
@@ -210,3 +211,19 @@ export const ATTR_LABELS: Record<keyof CharacterState['attributes'], string> = {
   WIS: 'Sabedoria',
   CHA: 'Carisma',
 };
+
+export interface CustomClass {
+  id: string;
+  name: string;
+  hd: '1d4' | '1d6' | '1d8';
+  weaponsArmor: string;
+  weapons?: string;
+  armors?: string[];
+  shields?: string[];
+  isSpellcaster: boolean;
+  castAttribute?: 'INT' | 'WIS' | 'CHA';
+  magicType?: 'arcana' | 'miracle' | 'dark';
+  spellsPerLevel?: Record<string, number[]>; // key represents level as string "1"..."10", value represents 5 numbers for tiers 1 to 5
+  startingTalents?: { name: string; description: string; hasUses?: boolean; maxUses?: number }[];
+  createdAt?: number;
+}

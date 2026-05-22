@@ -25,6 +25,7 @@ const ManageSystemsPage = lazy(() => import('./pages/GM/ManageSystemsPage').then
 const ShadowdarkMenuPage = lazy(() => import('./pages/GM/Systems/ShadowdarkMenuPage').then(m => ({ default: m.ShadowdarkMenuPage })));
 const ShadowdarkSpellsPage = lazy(() => import('./pages/GM/Systems/ShadowdarkSpellsPage').then(m => ({ default: m.ShadowdarkSpellsPage })));
 const ShadowdarkItemsPage = lazy(() => import('./pages/GM/Systems/ShadowdarkItemsPage').then(m => ({ default: m.ShadowdarkItemsPage })));
+const ShadowdarkClassesPage = lazy(() => import('./pages/GM/Systems/ShadowdarkClassesPage').then(m => ({ default: m.ShadowdarkClassesPage })));
 
 export const router = createBrowserRouter([
   {
@@ -132,6 +133,14 @@ export const router = createBrowserRouter([
         element: (
           <Suspense fallback={<Spinner />}>
             <ShadowdarkItemsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'gm/systems/shadowdark/classes',
+        element: (
+          <Suspense fallback={<Spinner />}>
+            <ShadowdarkClassesPage />
           </Suspense>
         ),
       },

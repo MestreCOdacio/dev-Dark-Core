@@ -15,6 +15,7 @@ import {
   Swords,
   Backpack,
   Flame,
+  Skull,
 } from "lucide-react";
 import {
   doc,
@@ -29,6 +30,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { Campaign, CharacterState, RollLog, ATTR_LABELS } from "../../types";
+import { TRAITS_DATA } from "../../data/traits";
 import {
   sanitizeCharacter,
   getStressColor,
@@ -210,6 +212,8 @@ export function CampaignViewPage() {
 
   const [isBulkXPModalOpen, setIsBulkXPModalOpen] = useState(false);
   const [isBulkRestModalOpen, setIsBulkRestModalOpen] = useState(false);
+  const [isBulkAfflictionModalOpen, setIsBulkAfflictionModalOpen] = useState(false);
+  const [bulkAfflictionType, setBulkAfflictionType] = useState<"common" | "severe">("common");
   const [bulkXPValue, setBulkXPValue] = useState(0);
   const [selectedBulkCharIds, setSelectedBulkCharIds] = useState<string[]>([]);
 
@@ -280,6 +284,70 @@ export function CampaignViewPage() {
       setSelectedBulkCharIds([]);
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, "characters_bulk_rest");
+    }
+  };
+
+  const handleBulkAffliction = async () => {
+    if (selectedBulkCharIds.length === 0 || !campaignId) return;
+    try {
+      const selectedChars = characters.filter((c) =>
+        selectedBulkCharIds.includes(c.id),
+      );
+
+      const affectedInfo: { charName: string; afflictionName: string }[] = [];
+      const listToUse = bulkAfflictionType === "common" ? TRAITS_DATA.afflictions : TRAITS_DATA.severeAfflictions;
+
+      for (const char of selectedChars) {
+        // Only draft from afflictions the character doesn't have yet
+        const remaining = listToUse.filter(
+          (a) => !char.afflictions.some((ca) => ca.name === a.name)
+        );
+
+        if (remaining.length > 0) {
+          const randomA = remaining[Math.floor(Math.random() * remaining.length)];
+          const newAffliction = {
+            id: Math.random().toString(36).substring(2, 11),
+            name: randomA.name,
+            description: randomA.description,
+            roll: randomA.roll,
+          };
+
+          const updatedAfflictions = [...char.afflictions, newAffliction];
+          await updateDoc(doc(db, "characters", char.id), {
+            afflictions: updatedAfflictions,
+          });
+
+          affectedInfo.push({
+            charName: char.name,
+            afflictionName: randomA.name,
+          });
+        }
+      }
+
+      if (affectedInfo.length > 0) {
+        const rollRef = doc(collection(db, "rolls"));
+        const severityType = bulkAfflictionType === "common" ? "Comuns" : "Severas";
+        const logLabel = `Aflições [${severityType}] sorteadas pelo Mestre: ` + 
+          affectedInfo.map((info) => `${info.charName} (${info.afflictionName})`).join(", ");
+
+        await setDoc(rollRef, {
+          id: rollRef.id,
+          characterId: `campaign-${campaignId}`,
+          characterName: "Mestre",
+          userId: userId || "gm",
+          type: "crit-fail",
+          value: 0,
+          modifier: 0,
+          label: logLabel,
+          timestamp: Date.now(),
+          advantageMode: "none",
+        });
+      }
+
+      setIsBulkAfflictionModalOpen(false);
+      setSelectedBulkCharIds([]);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, "characters_bulk_affliction");
     }
   };
 
@@ -1009,6 +1077,22 @@ export function CampaignViewPage() {
                         Descanso
                       </span>
                     </button>
+                    <button
+                      onClick={() => {
+                        setIsBulkAfflictionModalOpen(true);
+                        setSelectedBulkCharIds([]);
+                      }}
+                      className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-600 hover:text-rose-500 hover:border-rose-500/30 transition-all flex items-center gap-2 group"
+                      title="Sortear Aflição"
+                    >
+                      <Skull
+                        size={14}
+                        className="group-hover:scale-110 transition-transform text-rose-500/80"
+                      />
+                      <span className="text-[9px] uppercase font-black tracking-widest hidden sm:inline">
+                        Aflição
+                      </span>
+                    </button>
                   </div>
                 )}
 
@@ -1116,31 +1200,7 @@ export function CampaignViewPage() {
                             </div>
                           </div>
 
-                          {/* Estresse Section */}
-                          <div className="space-y-1">
-                            <div className="flex justify-between items-baseline font-sans">
-                              <span className="text-[10px] font-black tracking-wider text-amber-500 uppercase">
-                                Estresse
-                              </span>
-                              <div className="font-mono text-xs font-bold">
-                                <span className="text-white">{char.stress}</span>
-                                <span className="text-zinc-600"> / 20</span>
-                              </div>
-                            </div>
-                            {/* Medidor Estresse Segmentado */}
-                            <div className="flex gap-0.5 h-1.5 mt-1">
-                              {Array.from({ length: 20 }).map((_, i) => (
-                                <div
-                                  key={i}
-                                  className={`flex-1 rounded-sm transition-all duration-300 ${
-                                    i < char.stress
-                                      ? getStressColor(i)
-                                      : "bg-zinc-950 border border-zinc-900/50"
-                                  }`}
-                                />
-                              ))}
-                            </div>
-                          </div>
+
                         </div>
 
                         {/* CA Shield */}
@@ -1557,6 +1617,153 @@ export function CampaignViewPage() {
                   {isBulkXPModalOpen
                     ? "Confirmar Distribuição"
                     : "Confirmar Descanso"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isBulkAfflictionModalOpen && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="p-8 border-b border-zinc-900 flex items-center justify-between bg-zinc-950/50 backdrop-blur-md">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-2xl border bg-rose-500/10 border-rose-500/20 text-rose-500">
+                    <Skull size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white uppercase italic tracking-tighter w-full">
+                      Sortear Aflição
+                    </h3>
+                    <p className="text-[10px] uppercase font-black text-zinc-500 tracking-widest">
+                      Selecione quem receberá uma nova aflição
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setIsBulkAfflictionModalOpen(false);
+                    setSelectedBulkCharIds([]);
+                  }}
+                  className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white transition-all active:scale-95"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-8 flex-1 overflow-y-auto custom-scrollbar">
+                {/* Tipo de Aflição Selection */}
+                <div className="space-y-3">
+                  <h4 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest px-1">
+                    Tipo de Aflição
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setBulkAfflictionType("common")}
+                      className={`py-3 px-4 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                        bulkAfflictionType === "common"
+                          ? "bg-rose-500/10 border-rose-500/40 text-rose-500 shadow-[0_0_15px_rgba(239,68,68,0.1)]"
+                          : "bg-zinc-900/40 border-zinc-900 text-zinc-500 hover:text-zinc-300 hover:border-zinc-800"
+                      }`}
+                    >
+                      Comum (d6)
+                    </button>
+                    <button
+                      onClick={() => setBulkAfflictionType("severe")}
+                      className={`py-3 px-4 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                        bulkAfflictionType === "severe"
+                          ? "bg-rose-600/15 border-rose-500/40 text-rose-400 shadow-[0_0_15px_rgba(239,68,68,0.15)]"
+                          : "bg-zinc-900/40 border-zinc-900 text-zinc-500 hover:text-zinc-300 hover:border-zinc-800"
+                      }`}
+                    >
+                      Severa (d4)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest">
+                      Selecionar Fichas
+                    </h4>
+                    <button
+                      onClick={() => {
+                        if (selectedBulkCharIds.length === characters.length) {
+                          setSelectedBulkCharIds([]);
+                        } else {
+                          setSelectedBulkCharIds(characters.map((c) => c.id));
+                        }
+                      }}
+                      className="text-[9px] uppercase font-black text-rose-500 hover:text-rose-400 transition-colors tracking-widest"
+                    >
+                      {selectedBulkCharIds.length === characters.length
+                        ? "Desmarcar Todos"
+                        : "Marcar Todos"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    {characters.map((char) => (
+                      <button
+                        key={char.id}
+                        onClick={() => {
+                          if (selectedBulkCharIds.includes(char.id)) {
+                            setSelectedBulkCharIds(
+                              selectedBulkCharIds.filter(
+                                (id) => id !== char.id,
+                              ),
+                            );
+                          } else {
+                            setSelectedBulkCharIds([
+                              ...selectedBulkCharIds,
+                              char.id,
+                            ]);
+                          }
+                        }}
+                        className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                          selectedBulkCharIds.includes(char.id)
+                            ? "bg-rose-500/10 border-rose-500/30"
+                            : "bg-zinc-900/30 border-zinc-800/50 opacity-40 grayscale"
+                        }`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center font-black text-[10px] text-zinc-500">
+                            {char.level}
+                          </div>
+                          <div className="text-left">
+                            <div
+                              className={`text-sm font-black uppercase italic ${selectedBulkCharIds.includes(char.id) ? "text-white" : "text-zinc-600"}`}
+                            >
+                              {char.name}
+                            </div>
+                            <div className="text-[8px] uppercase tracking-widest font-black text-zinc-600">
+                              {char.class}
+                            </div>
+                          </div>
+                        </div>
+                        {selectedBulkCharIds.includes(char.id) && (
+                          <div className="p-1.5 rounded-lg bg-rose-500 text-white">
+                            <Check size={12} />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-zinc-950/80 border-t border-zinc-900">
+                <button
+                  onClick={handleBulkAffliction}
+                  disabled={selectedBulkCharIds.length === 0}
+                  className="w-full py-5 rounded-2xl font-black uppercase text-xs tracking-[0.3em] transition-all shadow-xl active:scale-95 disabled:opacity-30 disabled:grayscale bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/20"
+                >
+                  Sorteador de Aflição
                 </button>
               </div>
             </motion.div>

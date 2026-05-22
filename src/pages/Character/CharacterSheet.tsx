@@ -53,7 +53,8 @@ import {
   Trait,
   RollNotification,
   MasterItem,
-  ItemCategory
+  ItemCategory,
+  CustomClass
 } from '../../types';
 import { db } from '../../firebase';
 import { TRAITS_DATA } from '../../data/traits';
@@ -186,13 +187,29 @@ export default function CharacterSheet() {
   const [lastCustomResult, setLastCustomResult] = useState<{ rolls: { d: number, v: number }[], total: number } | null>(null);
   const [healingAfflictionId, setHealingAfflictionId] = useState<string | null>(null);
   const [expandedSpells, setExpandedSpells] = useState<Record<string, boolean>>({});
+  const [customClasses, setCustomClasses] = useState<CustomClass[]>([]);
 
   const toggleSpellExpanded = (spellId: string) => {
     setExpandedSpells(prev => ({ ...prev, [spellId]: !prev[spellId] }));
   };
 
+  useEffect(() => {
+    const q = query(collection(db, 'master_classes'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: CustomClass[] = [];
+      snapshot.forEach(docSnap => {
+        list.push({ ...docSnap.data(), id: docSnap.id } as CustomClass);
+      });
+      setCustomClasses(list);
+    }, (e) => {
+      console.error("Error loading master classes in Sheet:", e);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const currentClassDef = character ? customClasses.find(c => c.name.toLowerCase() === character.class.toLowerCase()) : null;
   const spellcasters: CharacterClass[] = ['Sacerdote', 'Mago', 'Bruxa', 'Cavaleiro Amaldiçoado'];
-  const isSpellcaster = character ? spellcasters.includes(character.class) : false;
+  const isSpellcaster = character ? (spellcasters.includes(character.class) || !!currentClassDef?.isSpellcaster) : false;
   const maxXP = character ? character.level * 10 : 10;
 
   useEffect(() => {
@@ -1112,6 +1129,85 @@ export default function CharacterSheet() {
     });
   };
 
+  const getTalents = (): { name: string; description: string; hasUses?: boolean; maxUses?: number }[] => {
+    if (!character) return [];
+    if (currentClassDef?.startingTalents) {
+      return currentClassDef.startingTalents;
+    }
+    
+    // Standard class fallbacks
+    const clsName = character.class.toLowerCase();
+    if (clsName === 'guerreiro') {
+      return [
+        { name: 'Especialista em Armas', description: '+1 para jogadas de ataque e dano com uma arma escolhida.' },
+        { name: 'Firmeza', description: 'Adiciona seu nível à sua jogada de HP máximo.' }
+      ];
+    } else if (clsName === 'sacerdote') {
+      return [
+        { name: 'Conjurar Milagres', description: 'Você pode conjurar milagres divinos.' },
+        { name: 'Fugir do Mal', description: 'Vantagem em jogadas de proteção contra efeitos malignos.' }
+      ];
+    } else if (clsName === 'mago') {
+      return [
+        { name: 'Conjuração Arcana', description: 'Você pode conjurar magias arcanas.' },
+        { name: 'Saber Ancestral', description: 'Vantagem em testes para identificar itens mágicos ou fatos históricos.' }
+      ];
+    } else if (clsName === 'ladino') {
+      return [
+        { name: 'Ataque Furtivo', description: '+1d6 de dano quando ataca um inimigo desprevenido ou flanqueado.' },
+        { name: 'Habilidades de Ladino', description: 'Vantagem em testes de destreza englobando furtividade, ladinagem e escalada.' }
+      ];
+    }
+    
+    return [];
+  };
+
+  const toggleTalentUse = async (talentName: string, maxUses: number, currentUses: number, increment: boolean) => {
+    if (!character || !charId) return;
+    const nextUses = increment
+      ? Math.min(maxUses, currentUses + 1)
+      : Math.max(0, currentUses - 1);
+
+    try {
+      const updatedTalentUses = {
+        ...(character.talentUses || {}),
+        [talentName]: nextUses
+      };
+      
+      // Update local state and DB
+      setCharacter(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          talentUses: updatedTalentUses
+        };
+      });
+      await updateDoc(doc(db, 'characters', charId), {
+        talentUses: updatedTalentUses
+      });
+    } catch (e) {
+      console.error("Error toggling talent use:", e);
+    }
+  };
+
+  const resetAllTalents = async () => {
+    if (!character || !charId) return;
+    try {
+      setCharacter(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          talentUses: {}
+        };
+      });
+      await updateDoc(doc(db, 'characters', charId), {
+        talentUses: {}
+      });
+    } catch (e) {
+      console.error("Error resetting all talents:", e);
+    }
+  };
+
   const updateArmor = (updates: Partial<CharacterState['armor']>) => {
     if (!character) return;
     const newArmor = { ...character.armor, ...updates };
@@ -1300,7 +1396,10 @@ export default function CharacterSheet() {
     let attrKey: keyof CharacterState['attributes'] = 'INT';
     let attrLabel = 'Inteligência';
 
-    if (character.class === 'Mago') {
+    if (currentClassDef?.isSpellcaster && currentClassDef?.castAttribute) {
+      attrKey = currentClassDef.castAttribute;
+      attrLabel = attrKey === 'INT' ? 'Inteligência' : attrKey === 'WIS' ? 'Sabedoria' : 'Carisma';
+    } else if (character.class === 'Mago') {
       attrKey = 'INT';
       attrLabel = 'Inteligência';
     } else if (character.class === 'Sacerdote') {
@@ -1550,53 +1649,6 @@ export default function CharacterSheet() {
       </div>
 
       <main className="max-w-[98%] mx-auto p-4 flex gap-6 items-start">
-        {/* Vertical Stress Bar */}
-        <div className="hidden lg:flex items-stretch gap-2 p-3 bg-zinc-900 border border-zinc-800 rounded-[32px] w-20 shrink-0 h-[600px] sticky top-24 shadow-2xl">
-           {/* Controls Track */}
-           <div className="flex flex-col items-center justify-center gap-4 w-8 border-r border-zinc-800/50 pr-2">
-              <button 
-                onClick={() => updateStress(1)} 
-                className="w-8 h-8 bg-zinc-950 border border-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 hover:text-amber-500 hover:border-amber-500/30 transition-all active:scale-90"
-              >
-                <Plus size={16} />
-              </button>
-
-              <button 
-                onClick={handleSanityRoll} 
-                className="w-8 h-8 bg-zinc-950 border border-zinc-800 rounded-lg flex items-center justify-center text-rose-500 hover:bg-rose-500/10 hover:border-rose-500/30 transition-all active:scale-90"
-                title="Teste de Sanidade"
-              >
-                <Brain size={16} />
-              </button>
-              
-              <div className="flex-1 flex items-center justify-center py-4">
-                <div className="[writing-mode:vertical-lr] rotate-180 flex items-center justify-center gap-3">
-                   <span className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-600">Estresse</span>
-                   <span className="text-xl font-black italic text-white font-mono tracking-tighter">{character.stress.toString().padStart(2, '0')}</span>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => updateStress(-1)} 
-                className="w-8 h-8 bg-zinc-950 border border-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 hover:text-amber-500 hover:border-amber-500/30 transition-all active:scale-90"
-              >
-                <Minus size={16} />
-              </button>
-           </div>
-           
-           {/* Segments Track */}
-           <div className="flex-1 flex flex-col-reverse justify-between gap-1 py-1">
-              {Array.from({length: 20}).map((_, i) => (
-                <div 
-                  key={i} 
-                  className={`flex-1 rounded-[1px] transition-all duration-300 ${
-                    i < character.stress ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-zinc-800/50'
-                  }`}
-                />
-              ))}
-           </div>
-        </div>
-
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Core Stats */}
           <div className="lg:col-span-3 space-y-6">
@@ -1888,7 +1940,7 @@ export default function CharacterSheet() {
                      tab === 'equip' ? 'Inv.' : 
                      tab === 'talents' ? 'Talentos' : 
                      tab === 'spell' ? 'Magia' : 
-                     tab === 'traits' ? 'Traços' : 'Extras'}
+                     tab === 'traits' ? 'Aflições' : 'Extras'}
                   </button>
                 ))}
               </nav>
@@ -2384,63 +2436,136 @@ export default function CharacterSheet() {
                           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl space-y-8">
                             <div className="flex items-center justify-between">
                                <div className="space-y-1">
-                                 <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white">Aflições & Virtudes</h3>
-                                 <p className="text-zinc-500 text-[10px] uppercase font-black tracking-widest">Traços que moldam sua mente e alma</p>
+                                 <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white">Aflições</h3>
+                                 <p className="text-zinc-500 text-[10px] uppercase font-black tracking-widest">Condições mentais e físicas que afetam o seu desempenho</p>
                                </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                               <div className="space-y-4">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-rose-500" />
-                                    <h4 className="text-[10px] uppercase font-black text-rose-500 tracking-widest">Aflições</h4>
-                                  </div>
-                                  <div className="space-y-4">
-                                     {character.afflictions.length === 0 ? (
-                                       <div className="py-8 text-center bg-zinc-950/30 border border-dashed border-zinc-800 rounded-2xl opacity-50">
-                                          <p className="text-[10px] uppercase font-black text-zinc-600 tracking-widest">Nenhuma aflição ativa</p>
-                                       </div>
-                                     ) : (
-                                       character.afflictions.map(a => (
-                                         <div key={a.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl relative group">
-                                            <div className="flex justify-between items-center mb-1">
-                                              <h5 className="font-black italic text-white uppercase">{a.name}</h5>
-                                              <button onClick={() => setHealingAfflictionId(a.id)} className="text-[8px] font-black uppercase text-rose-500 hover:text-rose-400">Curar</button>
-                                            </div>
-                                            <p className="text-[10px] italic text-zinc-500 leading-tight">{a.description}</p>
-                                         </div>
-                                       ))
-                                     )}
-                                  </div>
-                               </div>
-                               <div className="space-y-4">
-                                  <div className="flex items-center gap-2">
-                                     <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                                     <h4 className="text-[10px] uppercase font-black text-emerald-500 tracking-widest">Virtudes</h4>
-                                  </div>
-                                  <div className="space-y-4">
-                                     {character.virtues.length === 0 ? (
-                                       <div className="py-8 text-center bg-zinc-950/30 border border-dashed border-zinc-800 rounded-2xl opacity-50">
-                                          <p className="text-[10px] uppercase font-black text-zinc-600 tracking-widest">Nenhuma virtude ativa</p>
-                                       </div>
-                                     ) : (
-                                       character.virtues.map(v => (
-                                         <div key={v.id} className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl">
-                                            <h5 className="font-black italic text-white uppercase">{v.name}</h5>
-                                            <p className="text-[10px] italic text-zinc-500 leading-tight">{v.description}</p>
-                                         </div>
-                                       ))
-                                     )}
-                                  </div>
-                               </div>
+                            <div className="space-y-4">
+                               {character.afflictions.length === 0 ? (
+                                 <div className="py-12 text-center bg-zinc-950/30 border border-dashed border-zinc-800 rounded-2xl opacity-50">
+                                    <p className="text-[10px] uppercase font-black text-zinc-600 tracking-widest">Nenhuma aflição ativa</p>
+                                 </div>
+                               ) : (
+                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                   {character.afflictions.map(a => (
+                                     <div key={a.id} className="bg-zinc-950 border border-zinc-800 p-5 rounded-2xl relative group">
+                                        <div className="flex justify-between items-center mb-2">
+                                          <h5 className="font-black italic text-white uppercase text-sm tracking-wide">{a.name}</h5>
+                                          {isGM && (
+                                            <button onClick={() => removeAffliction(a.id)} className="text-[9px] font-black uppercase text-rose-500 hover:text-rose-400 transition-colors">
+                                              Curar
+                                            </button>
+                                          )}
+                                        </div>
+                                        <p className="text-xs text-zinc-400 leading-relaxed">{a.description}</p>
+                                     </div>
+                                   ))}
+                                 </div>
+                               )}
                             </div>
                           </div>
                         </div>
                       )}
 
                       {activeTab === 'talents' && (
-                        <div className="h-full flex flex-col items-center justify-center text-zinc-700 py-32 space-y-4">
-                           <Award size={48} className="opacity-10" />
-                           <p className="text-[10px] uppercase font-black tracking-[0.3em]">Talentos em breve</p>
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                            <div>
+                              <h3 className="text-sm font-black uppercase text-white tracking-widest flex items-center gap-1.5">
+                                <Award className="text-amber-500" size={16} /> Meus Talentos
+                              </h3>
+                              <p className="text-[10px] text-zinc-500 font-bold uppercase mt-0.5">
+                                Habilidades especiais e talentos de sua classe
+                              </p>
+                            </div>
+                            {getTalents().some(t => t.hasUses) && (
+                              <button
+                                onClick={resetAllTalents}
+                                className="text-[9px] uppercase font-black text-amber-500 border border-amber-500/20 px-3 py-1.5 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 transition-all hover:border-amber-500/30 flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Zap size={10} /> Restaurar Usos
+                              </button>
+                            )}
+                          </div>
+
+                          {getTalents().length === 0 ? (
+                            <div className="flex flex-col items-center justify-center text-zinc-750 py-24 space-y-4 border border-dashed border-zinc-800 rounded-3xl bg-zinc-950/20">
+                              <Award size={40} className="opacity-10" />
+                              <p className="text-[10px] uppercase font-black tracking-[0.2em] text-zinc-500">Nenhum talento cadastrado</p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {getTalents().map((talent) => {
+                                const current = character?.talentUses?.[talent.name] || 0;
+                                const max = talent.maxUses || 1;
+                                return (
+                                  <div 
+                                    key={talent.name}
+                                    className="bg-zinc-900 border border-zinc-850 p-5 rounded-[24px] flex flex-col justify-between gap-4 hover:border-zinc-800 transition-all"
+                                  >
+                                    <div className="space-y-1.5">
+                                      <h4 className="font-extrabold text-white text-sm uppercase italic tracking-wide">{talent.name}</h4>
+                                      <p className="text-xs text-zinc-400 leading-relaxed">{talent.description}</p>
+                                    </div>
+
+                                    {talent.hasUses && (
+                                      <div className="border-t border-zinc-800/60 pt-3 flex items-center justify-between">
+                                        <div className="space-y-1">
+                                          <span className="text-[8px] uppercase font-black text-zinc-500 block">Usos Restantes</span>
+                                          <div className="flex items-center gap-1.5">
+                                            {Array.from({ length: max }).map((_, i) => {
+                                              const remaining = Math.max(0, max - current);
+                                              const isFilled = i < remaining;
+                                              return (
+                                                <button
+                                                  key={i}
+                                                  onClick={() => {
+                                                    if (isFilled) {
+                                                      toggleTalentUse(talent.name, max, current, true);
+                                                    } else {
+                                                      toggleTalentUse(talent.name, max, current, false);
+                                                    }
+                                                  }}
+                                                  className={`w-3.5 h-3.5 rounded-full border transition-all cursor-pointer ${
+                                                    isFilled 
+                                                      ? 'bg-amber-500 border-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                                                      : 'border-zinc-750 bg-zinc-950 hover:border-zinc-500'
+                                                  }`}
+                                                  title={isFilled ? "Gastar uso" : "Recuperar uso"}
+                                                />
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            onClick={() => toggleTalentUse(talent.name, max, current, false)}
+                                            disabled={current === 0}
+                                            className="w-7 h-7 bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white rounded-lg flex items-center justify-center text-xs font-black disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                                            title="Recuperar uso"
+                                          >
+                                            +
+                                          </button>
+                                          <span className="font-mono text-xs font-bold text-white w-9 text-center">
+                                            {Math.max(0, max - current)}/{max}
+                                          </span>
+                                          <button
+                                            onClick={() => toggleTalentUse(talent.name, max, current, true)}
+                                            disabled={current >= max}
+                                            className="w-7 h-7 bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white rounded-lg flex items-center justify-center text-xs font-black disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                                            title="Gastar uso"
+                                          >
+                                            -
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       )}
 
