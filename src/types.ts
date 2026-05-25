@@ -116,6 +116,13 @@ export interface CharacterState {
   virtueMargin?: number;
   spellModifier?: number;
   talentUses?: Record<string, number>;
+  talents?: {
+    name: string;
+    description: string;
+    type: 'initial' | 'level' | 'ancestry';
+    hasUses?: boolean;
+    maxUses?: number;
+  }[];
 }
 
 export interface Trait {
@@ -225,5 +232,6 @@ export interface CustomClass {
   magicType?: 'arcana' | 'miracle' | 'dark';
   spellsPerLevel?: Record<string, number[]>; // key represents level as string "1"..."10", value represents 5 numbers for tiers 1 to 5
   startingTalents?: { name: string; description: string; hasUses?: boolean; maxUses?: number }[];
+  rollTable?: { range: string; effect: string }[];
   createdAt?: number;
 }

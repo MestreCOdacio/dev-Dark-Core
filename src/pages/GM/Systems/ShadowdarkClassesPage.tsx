@@ -124,6 +124,11 @@ export function ShadowdarkClassesPage() {
   // Starting Talents
   const [startingTalents, setStartingTalents] = useState<{ name: string; description: string; hasUses?: boolean; maxUses?: number }[]>([]);
 
+  // Talent roll table state (exactly 5 rows)
+  const [talentRollTable, setTalentRollTable] = useState<{ range: string; effect: string }[]>(() => {
+    return Array.from({ length: 5 }, () => ({ range: '', effect: '' }));
+  });
+
   useEffect(() => {
     const q = query(collection(db, 'master_items'), orderBy('name', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -173,6 +178,7 @@ export function ShadowdarkClassesPage() {
     }
     setSpellGrid(grid);
     setStartingTalents([]);
+    setTalentRollTable(Array.from({ length: 5 }, () => ({ range: '', effect: '' })));
   };
 
   const handleOpenCreate = () => {
@@ -194,6 +200,18 @@ export function ShadowdarkClassesPage() {
     const mType = cls.magicType || (cls.castAttribute === 'WIS' ? 'miracle' : cls.castAttribute === 'CHA' ? 'dark' : 'arcana');
     setMagicType(mType);
     setStartingTalents(cls.startingTalents || []);
+    
+    // load talent roll table (exactly 5 rows)
+    if (cls.rollTable && cls.rollTable.length === 5) {
+      setTalentRollTable(cls.rollTable);
+    } else {
+      const existing = cls.rollTable || [];
+      const table = Array.from({ length: 5 }, (_, i) => ({
+        range: existing[i]?.range || '',
+        effect: existing[i]?.effect || ''
+      }));
+      setTalentRollTable(table);
+    }
     
     // load grid
     const grid: Record<string, number[]> = {};
@@ -256,6 +274,10 @@ export function ShadowdarkClassesPage() {
         shields: selectedShields,
         isSpellcaster,
         startingTalents: startingTalents.filter(t => t.name.trim() !== ''),
+        rollTable: talentRollTable.map(row => ({
+          range: row.range.trim(),
+          effect: row.effect.trim()
+        }))
       };
 
       if (isSpellcaster) {
@@ -492,6 +514,28 @@ export function ShadowdarkClassesPage() {
                                     <p className="text-xs text-zinc-300 mt-1 leading-relaxed">{t.description}</p>
                                   </div>
                                 ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {cls.rollTable && cls.rollTable.length > 0 && (
+                            <div className="space-y-3 border-t border-zinc-900 pt-4">
+                              <h4 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest flex items-center gap-1.5">
+                                <Sparkles size={10} className="text-amber-500" /> Tabela de Talentos (Nível) - 2d6
+                              </h4>
+                              <div className="bg-zinc-950/50 border border-zinc-900 rounded-2xl overflow-hidden">
+                                <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-zinc-950 text-[8px] uppercase font-gray-500 font-extrabold tracking-wider border-b border-zinc-900">
+                                  <div className="col-span-3 text-center">Rolagem</div>
+                                  <div className="col-span-9">Efeito obtido</div>
+                                </div>
+                                <div className="divide-y divide-zinc-800/60">
+                                  {cls.rollTable.map((row, idx) => (
+                                    <div key={idx} className="grid grid-cols-12 gap-2 px-4 py-2.5 items-center text-xs">
+                                      <div className="col-span-3 text-center font-mono font-bold text-amber-500">{row.range || '-'}</div>
+                                      <div className="col-span-9 font-semibold text-zinc-300">{row.effect || '-'}</div>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             </div>
                           )}
@@ -888,6 +932,57 @@ export function ShadowdarkClassesPage() {
                       ))}
                     </div>
                   )}
+                </div>
+
+                {/* Talent Roll Table Section */}
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                    <h4 className="text-[10px] uppercase font-black text-zinc-400 tracking-widest flex items-center gap-1.5">
+                      <Sparkles size={14} className="text-amber-500" /> Tabela de Talentos (Nível) - 2d6
+                    </h4>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 leading-relaxed font-bold">
+                    Defina exatamente 5 opções de talento para a classe. A rolagem é calculada com a soma de 2d6 (2 a 12). Exemplos de rolagem: <span className="text-zinc-400">"2"</span>, <span className="text-zinc-400">"3-6"</span>, <span className="text-zinc-400">"7-9"</span>, <span className="text-zinc-400">"10-11"</span>, <span className="text-zinc-400">"12"</span>.
+                  </p>
+                  
+                  <div className="bg-zinc-900/30 border border-zinc-900 rounded-2xl p-4 space-y-3">
+                    <div className="grid grid-cols-12 gap-3 text-[8px] uppercase font-black tracking-wider text-zinc-500 pb-1.5 border-b border-zinc-900">
+                      <div className="col-span-3 text-center">Rolagem (x-y ou x)</div>
+                      <div className="col-span-9">Rolagem do Talento / Efeito</div>
+                    </div>
+                    {talentRollTable.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-3 items-center">
+                        <div className="col-span-3">
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ex: 3-6"
+                            value={row.range}
+                            onChange={(e) => {
+                              const updated = [...talentRollTable];
+                              updated[idx] = { ...updated[idx], range: e.target.value };
+                              setTalentRollTable(updated);
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:border-amber-500/50 text-center"
+                          />
+                        </div>
+                        <div className="col-span-9">
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ex: +1 para jogadas de ataque com armas corpo a corpo"
+                            value={row.effect}
+                            onChange={(e) => {
+                              const updated = [...talentRollTable];
+                              updated[idx] = { ...updated[idx], effect: e.target.value };
+                              setTalentRollTable(updated);
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:border-amber-500/50"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Confirm Buttons */}

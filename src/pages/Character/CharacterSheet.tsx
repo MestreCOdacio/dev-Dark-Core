@@ -39,7 +39,8 @@ import {
   Pause,
   Play,
   Droplets,
-  Brain
+  Brain,
+  Edit
 } from 'lucide-react';
 import { 
   CharacterState, 
@@ -163,6 +164,8 @@ export default function CharacterSheet() {
   const [customItemName, setCustomItemName] = useState("");
   const [customItemSlots, setCustomItemSlots] = useState(1);
   const [customItemDescription, setCustomItemDescription] = useState("");
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [isEditItemModalOpen, setIsEditItemModalOpen] = useState(false);
   const [masterItems, setMasterItems] = useState<MasterItem[]>([]);
   const [itemModalTab, setItemModalTab] = useState<ItemCategory>('Geral');
   const [itemSearchTerm, setItemSearchTerm] = useState('');
@@ -187,7 +190,35 @@ export default function CharacterSheet() {
   const [lastCustomResult, setLastCustomResult] = useState<{ rolls: { d: number, v: number }[], total: number } | null>(null);
   const [healingAfflictionId, setHealingAfflictionId] = useState<string | null>(null);
   const [expandedSpells, setExpandedSpells] = useState<Record<string, boolean>>({});
+  const [spellAdvDis, setSpellAdvDis] = useState<Record<string, 'advantage' | 'disadvantage' | 'none'>>({});
+  const [weaponAdvDis, setWeaponAdvDis] = useState<Record<string, 'advantage' | 'disadvantage' | 'none'>>({});
   const [customClasses, setCustomClasses] = useState<CustomClass[]>([]);
+
+  const toggleSpellAdvDis = (spellId: string, mode: 'advantage' | 'disadvantage') => {
+    setSpellAdvDis(prev => {
+      const current = prev[spellId] || 'none';
+      const next = current === mode ? 'none' : mode;
+      return { ...prev, [spellId]: next };
+    });
+  };
+
+  const toggleWeaponAdvDis = (weaponId: string, mode: 'advantage' | 'disadvantage') => {
+    setWeaponAdvDis(prev => {
+      const current = prev[weaponId] || 'none';
+      const next = current === mode ? 'none' : mode;
+      return { ...prev, [weaponId]: next };
+    });
+  };
+
+  // Talent states
+  const [isRollConfirmOpen, setIsRollConfirmOpen] = useState(false);
+  const [isRollResultOpen, setIsRollResultOpen] = useState(false);
+  const [rollResult, setRollResult] = useState<{ d1: number; d2: number; sum: number; effect: string } | null>(null);
+  const [isGMAddTalentOpen, setIsGMAddTalentOpen] = useState(false);
+  const [gmSelectedTalentRow, setGmSelectedTalentRow] = useState<number | 'custom'>(0);
+  const [gmCustomName, setGmCustomName] = useState('');
+  const [gmCustomDescription, setGmCustomDescription] = useState('');
+  const [gmCustomType, setGmCustomType] = useState<'initial' | 'level' | 'ancestry'>('level');
 
   const toggleSpellExpanded = (spellId: string) => {
     setExpandedSpells(prev => ({ ...prev, [spellId]: !prev[spellId] }));
@@ -209,6 +240,23 @@ export default function CharacterSheet() {
 
   const currentClassDef = character ? customClasses.find(c => c.name.toLowerCase() === character.class.toLowerCase()) : null;
   const spellcasters: CharacterClass[] = ['Sacerdote', 'Mago', 'Bruxa', 'Cavaleiro Amaldiçoado'];
+
+  useEffect(() => {
+    if (!character) return;
+    if (gmSelectedTalentRow === 'custom') {
+      setGmCustomName('');
+      setGmCustomDescription('');
+    } else {
+      const idx = gmSelectedTalentRow;
+      const table = getClassRollTable(character.class, currentClassDef || undefined);
+      const row = table[idx];
+      if (row) {
+        setGmCustomName(`${gmCustomType === 'initial' ? 'Talento Inicial' : gmCustomType === 'ancestry' ? 'Talento de Ancestralidade' : 'Talento de Nível'} (${row.range})`);
+        setGmCustomDescription(row.effect);
+      }
+    }
+  }, [gmSelectedTalentRow, gmCustomType, character, customClasses]);
+
   const isSpellcaster = character ? (spellcasters.includes(character.class) || !!currentClassDef?.isSpellcaster) : false;
   const maxXP = character ? character.level * 10 : 10;
 
@@ -386,11 +434,13 @@ export default function CharacterSheet() {
     let r1: number | undefined;
     let r2: number | undefined;
     
-    if (advantageMode === 'advantage') {
+    const activeAdvMode = weaponAdvDis[item.id] || 'none';
+    
+    if (activeAdvMode === 'advantage') {
       r1 = Math.floor(Math.random() * 20) + 1;
       r2 = Math.floor(Math.random() * 20) + 1;
       roll = Math.max(r1, r2);
-    } else if (advantageMode === 'disadvantage') {
+    } else if (activeAdvMode === 'disadvantage') {
       r1 = Math.floor(Math.random() * 20) + 1;
       r2 = Math.floor(Math.random() * 20) + 1;
       roll = Math.min(r1, r2);
@@ -408,7 +458,7 @@ export default function CharacterSheet() {
       attributeLabel: label,
       r1,
       r2,
-      advDis: advantageMode === 'none' ? null : advantageMode,
+      advDis: activeAdvMode === 'none' ? null : activeAdvMode,
       timestamp: Date.now()
     };
     
@@ -426,16 +476,14 @@ export default function CharacterSheet() {
         modifier: mod + extraMod,
         label: label,
         timestamp: Date.now(),
-        advantageMode: advantageMode,
+        advantageMode: activeAdvMode,
         r1: r1 || null,
         r2: r2 || null
       });
     } catch (e) { console.error(e); }
     
-    // Optional: reset advantage mode? User didn't ask for reset, but usually helpful.
-    // User said "todas as rolagens a partir das armas são roladas com a regra...", 
-    // implying it's a state that stays until toggled off. 
-    // I'll keep it active until manually toggled.
+    // Reset specific weapon advantage after rolling
+    setWeaponAdvDis(prev => ({ ...prev, [item.id]: 'none' }));
   };
 
   const handleUpdateFinesse = async (itemId: string, attr: 'STR' | 'DEX') => {
@@ -577,6 +625,39 @@ export default function CharacterSheet() {
     setCustomItemSlots(1);
     setCustomItemDescription("");
     setIsCustomItemModalOpen(false);
+  };
+
+  const startEditingItem = (item: InventoryItem) => {
+    setEditingItem({ ...item });
+    setIsEditItemModalOpen(true);
+  };
+
+  const saveEditedItem = async () => {
+    if (!character || !editingItem) return;
+    
+    // Check carrying limit if slots increased
+    const originalItem = character.inventory.find(i => i.id === editingItem.id);
+    const originalSlots = originalItem ? originalItem.slots : 0;
+    const currentWeight = calculateTotalSlots();
+    const maxWeight = Math.max(character.attributes.STR, 10);
+    
+    if (currentWeight - originalSlots + editingItem.slots > maxWeight) {
+      alert(`Peso total excedido! Limite atual: ${maxWeight}. Peso com a modificação: ${currentWeight - originalSlots + editingItem.slots}.`);
+      return;
+    }
+
+    const updatedInventory = character.inventory.map(item => {
+      if (item.id === editingItem.id) {
+        return { ...editingItem };
+      }
+      return item;
+    });
+
+    setCharacter(prev => prev ? { ...prev, inventory: updatedInventory } : null);
+    await updateCharacterInDB({ inventory: updatedInventory });
+    
+    setIsEditItemModalOpen(false);
+    setEditingItem(null);
   };
 
   const toggleLightingItem = async (itemId: string) => {
@@ -1079,23 +1160,7 @@ export default function CharacterSheet() {
 
       updateCharacterInDB({ hp: updatedHP });
 
-      // Log Healing (Rest)
-      if (amount > 0 && newCurrent > oldHP && charId) {
-        const healed = newCurrent - oldHP;
-        const rollRef = doc(collection(db, 'rolls'));
-        setDoc(rollRef, {
-          id: rollRef.id,
-          characterId: charId,
-          characterName: prev.name,
-          userId: prev.userId,
-          type: 'normal',
-          value: healed,
-          modifier: 0,
-          label: `Recuperou ${healed} PV (Descanso)`,
-          timestamp: Date.now(),
-          advantageMode: 'none'
-        }).catch(e => console.error("History log failed:", e));
-      }
+      
 
       return {
         ...prev,
@@ -1129,37 +1194,237 @@ export default function CharacterSheet() {
     });
   };
 
-  const getTalents = (): { name: string; description: string; hasUses?: boolean; maxUses?: number }[] => {
-    if (!character) return [];
-    if (currentClassDef?.startingTalents) {
-      return currentClassDef.startingTalents;
+  const isValueInFormat = (val: number, rangeStr: string): boolean => {
+    if (!rangeStr) return false;
+    const parts = rangeStr.trim().split('-');
+    if (parts.length === 2) {
+      const min = parseInt(parts[0].trim(), 10);
+      const max = parseInt(parts[1].trim(), 10);
+      return val >= min && val <= max;
+    } else {
+      const single = parseInt(rangeStr.trim(), 10);
+      return val === single;
+    }
+  };
+
+  const getClassRollTable = (className: string, classDef?: CustomClass): { range: string; effect: string }[] => {
+    if (classDef?.rollTable && classDef.rollTable.length === 5) {
+      return classDef.rollTable;
     }
     
-    // Standard class fallbacks
-    const clsName = character.class.toLowerCase();
+    const clsName = className.toLowerCase();
     if (clsName === 'guerreiro') {
       return [
-        { name: 'Especialista em Armas', description: '+1 para jogadas de ataque e dano com uma arma escolhida.' },
-        { name: 'Firmeza', description: 'Adiciona seu nível à sua jogada de HP máximo.' }
+        { range: '2', effect: '+1 no modificador de Força ou Destreza' },
+        { range: '3-6', effect: 'Vantagem em rolagens de ataque com uma arma escolhida' },
+        { range: '7-9', effect: '+1 em Jogadas de Proteção ou testes de Força/Destreza' },
+        { range: '10-11', effect: '+2 de HP por nível adicional' },
+        { range: '12', effect: 'Adicione seu nível às suas jogadas de dano físico' },
       ];
     } else if (clsName === 'sacerdote') {
       return [
-        { name: 'Conjurar Milagres', description: 'Você pode conjurar milagres divinos.' },
-        { name: 'Fugir do Mal', description: 'Vantagem em jogadas de proteção contra efeitos malignos.' }
+        { range: '2', effect: '+1 no modificador de Sabedoria ou Constituição' },
+        { range: '3-6', effect: 'Vantagem em rolagens de conjuração de um milagre conhecido' },
+        { range: '7-9', effect: '+1 de defesa em armaduras médias e pesadas' },
+        { range: '10-11', effect: '+1 em jogadas de afastar mortos-vivos (Turn Undead)' },
+        { range: '12', effect: 'Escolha um milagre adicional de qualquer grau que possa conjurar' },
       ];
     } else if (clsName === 'mago') {
       return [
-        { name: 'Conjuração Arcana', description: 'Você pode conjurar magias arcanas.' },
-        { name: 'Saber Ancestral', description: 'Vantagem em testes para identificar itens mágicos ou fatos históricos.' }
+        { range: '2', effect: '+1 no modificador de Inteligência ou Constituição' },
+        { range: '3-6', effect: 'Vantagem em rolagens de conjuração de uma magia conhecida' },
+        { range: '7-9', effect: 'Aprenda 1 magia adicional de qualquer grau que possa conjurar' },
+        { range: '10-11', effect: '+1 para todas as rolagens de conjuração arcana' },
+        { range: '12', effect: '+1 no dano ou efeito de todas as suas magias arcanas' },
       ];
     } else if (clsName === 'ladino') {
       return [
-        { name: 'Ataque Furtivo', description: '+1d6 de dano quando ataca um inimigo desprevenido ou flanqueado.' },
-        { name: 'Habilidades de Ladino', description: 'Vantagem em testes de destreza englobando furtividade, ladinagem e escalada.' }
+        { range: '2', effect: '+1 no modificador de Destreza ou Carisma' },
+        { range: '3-6', effect: '+1d6 de dano adicional em Ataque Furtivo' },
+        { range: '7-9', effect: 'Vantagem em testes de Percepção ou iniciativa' },
+        { range: '10-11', effect: 'Pode se camuflar perfeitamente se estiver nas sombras' },
+        { range: '12', effect: 'Vantagem em testes de proteção contra venenos e armadilhas' },
       ];
     }
     
-    return [];
+    return [
+      { range: '2', effect: '+1 para Força, Destreza ou Constituição' },
+      { range: '3-6', effect: '+1 para jogadas de ataque com armas' },
+      { range: '7-9', effect: '+1 em jogadas de proteção ou testes de atributos' },
+      { range: '10-11', effect: '+1 em rolagens de conjuração ou habilidades de classe' },
+      { range: '12', effect: 'Vantagem em jogadas de iniciativa e testes de percepção' },
+    ];
+  };
+
+  const getTalents = (): { name: string; description: string; type: 'initial' | 'level' | 'ancestry'; hasUses?: boolean; maxUses?: number; isCustom?: boolean }[] => {
+    if (!character) return [];
+    
+    // 1. Core Starting talents
+    let initialTalents: { name: string; description: string; type: 'initial'; hasUses?: boolean; maxUses?: number }[] = [];
+    if (currentClassDef?.startingTalents) {
+      initialTalents = currentClassDef.startingTalents.map(t => ({
+        name: t.name,
+        description: t.description,
+        type: 'initial' as const,
+        hasUses: t.hasUses,
+        maxUses: t.maxUses
+      }));
+    } else {
+      const clsName = character.class.toLowerCase();
+      let fallbacks: { name: string; description: string }[] = [];
+      if (clsName === 'guerreiro') {
+        fallbacks = [
+          { name: 'Especialista em Armas', description: '+1 para jogadas de ataque e dano com uma arma escolhida.' },
+          { name: 'Firmeza', description: 'Adiciona seu nível à sua jogada de HP máximo.' }
+        ];
+      } else if (clsName === 'sacerdote') {
+        fallbacks = [
+          { name: 'Conjurar Milagres', description: 'Você pode conjurar milagres divinos.' },
+          { name: 'Fugir do Mal', description: 'Vantagem em jogadas de proteção contra efeitos malignos.' }
+        ];
+      } else if (clsName === 'mago') {
+        fallbacks = [
+          { name: 'Conjuração Arcana', description: 'Você pode conjurar magias arcanas.' },
+          { name: 'Saber Ancestral', description: 'Vantagem em testes para identificar itens mágicos ou fatos históricos.' }
+        ];
+      } else if (clsName === 'ladino') {
+        fallbacks = [
+          { name: 'Ataque Furtivo', description: '+1d6 de dano quando ataca um inimigo desprevenido ou flanqueado.' },
+          { name: 'Habilidades de Ladino', description: 'Vantagem em testes de destreza englobando furtividade, ladinagem e escalada.' }
+        ];
+      }
+      initialTalents = fallbacks.map(t => ({
+        name: t.name,
+        description: t.description,
+        type: 'initial' as const
+      }));
+    }
+    
+    // 2. Acquired/stored Custom talents from DB
+    const storedTalents = (character.talents || []).map(t => ({
+      name: t.name,
+      description: t.description,
+      type: t.type || 'level',
+      hasUses: !!t.hasUses,
+      maxUses: t.maxUses,
+      isCustom: true
+    }));
+    
+    return [...initialTalents, ...storedTalents];
+  };
+
+  const handleAcquireTalentRoll = async () => {
+    if (!character || !charId) return;
+    
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+    const sum = d1 + d2;
+    
+    const table = getClassRollTable(character.class, currentClassDef || undefined);
+    const match = table.find(row => isValueInFormat(sum, row.range));
+    const effectText = match ? match.effect : "Efeito não cadastrado na tabela.";
+    
+    try {
+      const newTalent = {
+        name: `Talento de Nível (Rolado: ${sum})`,
+        description: effectText,
+        type: 'level' as const
+      };
+      
+      const updatedTalents = [...(character.talents || []), newTalent];
+      
+      setCharacter(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          talents: updatedTalents
+        };
+      });
+      
+      await updateDoc(doc(db, 'characters', charId), {
+        talents: updatedTalents
+      });
+      
+      setRollResult({ d1, d2, sum, effect: effectText });
+      setIsRollConfirmOpen(false);
+      setIsRollResultOpen(true);
+    } catch (err) {
+      console.error("Error setting acquired talent:", err);
+    }
+  };
+
+  const handleGMAddTalent = async () => {
+    if (!character || !charId || !isGM) return;
+    
+    let finalName = gmCustomName.trim();
+    let finalDesc = gmCustomDescription.trim();
+    
+    if (gmSelectedTalentRow !== 'custom') {
+      const idx = typeof gmSelectedTalentRow === 'number' ? gmSelectedTalentRow : 0;
+      const table = getClassRollTable(character.class, currentClassDef || undefined);
+      const row = table[idx];
+      if (row) {
+        if (!finalName) {
+          finalName = `${gmCustomType === 'initial' ? 'Talento Inicial' : gmCustomType === 'ancestry' ? 'Talento de Ancestralidade' : 'Talento de Nível'} (${row.range})`;
+        }
+        if (!finalDesc) {
+          finalDesc = row.effect;
+        }
+      }
+    }
+    
+    if (!finalName || !finalDesc) {
+      return;
+    }
+    
+    try {
+      const newTalent = {
+        name: finalName,
+        description: finalDesc,
+        type: gmCustomType
+      };
+      
+      const updatedTalents = [...(character.talents || []), newTalent];
+      
+      setCharacter(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          talents: updatedTalents
+        };
+      });
+      
+      await updateDoc(doc(db, 'characters', charId), {
+        talents: updatedTalents
+      });
+      
+      setIsGMAddTalentOpen(false);
+      setGmSelectedTalentRow(0);
+      setGmCustomName('');
+      setGmCustomDescription('');
+      setGmCustomType('level');
+    } catch (err) {
+      console.error("Error manually adding talent:", err);
+    }
+  };
+
+  const handleDeleteTalent = async (talentName: string) => {
+    if (!character || !charId || !isGM) return;
+    try {
+      const updatedTalents = (character.talents || []).filter(t => t.name !== talentName);
+      setCharacter(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          talents: updatedTalents
+        };
+      });
+      await updateDoc(doc(db, 'characters', charId), {
+        talents: updatedTalents
+      });
+    } catch (err) {
+      console.error("Error removing talent:", err);
+    }
   };
 
   const toggleTalentUse = async (talentName: string, maxUses: number, currentUses: number, increment: boolean) => {
@@ -1416,7 +1681,8 @@ export default function CharacterSheet() {
     const totalModifier = mod + spellMod;
     const targetDC = 10 + spell.tier;
 
-    const advMode = character.advDis[attrKey] || 'none';
+    const spellMode = spellAdvDis[spell.id] || 'none';
+    const advMode = spellMode !== 'none' ? spellMode : (character.advDis[attrKey] || 'none');
     let diceValue = 0;
     let r1: number | undefined;
     let r2: number | undefined;
@@ -1495,6 +1761,7 @@ export default function CharacterSheet() {
     }
 
     // Reset advantage/disadvantage after roll
+    setSpellAdvDis(prev => ({ ...prev, [spell.id]: 'none' }));
     const updatedAdvDis = { ...character.advDis, [attrKey]: null };
     setCharacter(p => p ? { ...p, advDis: updatedAdvDis } : null);
     await updateCharacterInDB({ advDis: updatedAdvDis });
@@ -1958,8 +2225,8 @@ export default function CharacterSheet() {
                     >
                       {activeTab === 'combat' && (
                         <div className="space-y-8">
-                           {/* Global Modifiers (Vantagem/Desvantagem) */}
-                           <div className="bg-zinc-900/50 border border-zinc-800 rounded-3xl p-4 flex items-center justify-center gap-4">
+
+                           <div className="hidden">
                               <button
                                 onClick={() => setAdvantageMode(advantageMode === 'advantage' ? 'none' : 'advantage')}
                                 className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${
@@ -2008,9 +2275,43 @@ export default function CharacterSheet() {
                                                 </div>
                                              </div>
                                              <div className="flex items-center gap-4">
-                                               <div className="flex items-center gap-2">
-                                                  <button 
-                                                    onClick={(e) => { e.stopPropagation(); rollWeaponAttack(weapon); }}
+                                               <div className="flex flex-wrap items-center gap-2">
+															{/* Advantage / Disadvantage toggles */}
+															<div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800/80 p-0.5 rounded-xl shrink-0 font-sans">
+																<button
+																	type="button"
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		toggleWeaponAdvDis(weapon.id, 'advantage');
+																	}}
+																	className={`px-2 py-1 text-[9px] uppercase font-black tracking-wider rounded-lg transition-all cursor-pointer border ${
+																		weaponAdvDis[weapon.id] === 'advantage'
+																			? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35 shadow-[0_0_8px_rgba(16,185,129,0.15)] font-black select-none'
+																			: 'bg-transparent text-zinc-550 border-transparent hover:text-zinc-355'
+																	}`}
+																	title="Rolar este ataque com Vantagem"
+																>
+																	Van
+																</button>
+																<button
+																	type="button"
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		toggleWeaponAdvDis(weapon.id, 'disadvantage');
+																	}}
+																	className={`px-2 py-1 text-[9px] uppercase font-black tracking-wider rounded-lg transition-all cursor-pointer border ${
+																		weaponAdvDis[weapon.id] === 'disadvantage'
+																			? 'bg-rose-500/15 text-rose-450 border-rose-500/35 shadow-[0_0_8px_rgba(244,63,94,0.15)] font-black select-none'
+																			: 'bg-transparent text-zinc-550 border-transparent hover:text-zinc-355 select-none'
+																	}`}
+																	title="Rolar este ataque com Desvantagem"
+																>
+																	Des
+																</button>
+															</div>
+
+															<button 
+																onClick={(e) => { e.stopPropagation(); rollWeaponAttack(weapon); }}
                                                     className="w-10 h-10 bg-amber-600/10 text-amber-500 rounded-lg flex items-center justify-center hover:bg-amber-600 hover:text-white transition-all shadow-inner"
                                                     title="Atacar"
                                                   >
@@ -2204,8 +2505,14 @@ export default function CharacterSheet() {
                                             )}
 
                                             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-900">
-                                              <div className="flex items-center gap-2">
-                                                {(item.category === 'Armadura' || item.category === 'Escudo') && (
+																			  <div className="flex items-center gap-2">
+																				<button
+																					onClick={() => startEditingItem(item)}
+																					className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all bg-zinc-900 text-zinc-400 hover:text-white"
+																				>
+																					<Edit size={12} /> Editar
+																				</button>
+																				{(item.category === 'Armadura' || item.category === 'Escudo') && (
                                                   <button
                                                     onClick={() => handleToggleEquip(item.id)}
                                                     className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${
@@ -2330,7 +2637,41 @@ export default function CharacterSheet() {
                                                )}
                                             </div>
 
-                                            <div className="flex items-center gap-2 z-10">
+                                            <div className="flex flex-wrap items-center gap-2 z-10">
+                                               {/* Advantage / Disadvantage toggles */}
+                                               <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800/80 p-0.5 rounded-xl shrink-0 font-sans">
+                                                 <button
+                                                   type="button"
+                                                   onClick={(e) => {
+                                                     e.stopPropagation();
+                                                     toggleSpellAdvDis(spell.id, 'advantage');
+                                                   }}
+                                                   className={`px-2 py-1 text-[9px] uppercase font-black tracking-wider rounded-lg transition-all cursor-pointer border ${
+                                                     spellAdvDis[spell.id] === 'advantage'
+                                                       ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35 shadow-[0_0_8px_rgba(16,185,129,0.15)] font-black select-none'
+                                                       : 'bg-transparent text-zinc-550 border-transparent hover:text-zinc-355'
+                                                   }`}
+                                                   title="Rolar esta magia com Vantagem"
+                                                 >
+                                                   Van
+                                                 </button>
+                                                 <button
+                                                   type="button"
+                                                   onClick={(e) => {
+                                                     e.stopPropagation();
+                                                     toggleSpellAdvDis(spell.id, 'disadvantage');
+                                                   }}
+                                                   className={`px-2 py-1 text-[9px] uppercase font-black tracking-wider rounded-lg transition-all cursor-pointer border ${
+                                                     spellAdvDis[spell.id] === 'disadvantage'
+                                                       ? 'bg-rose-500/15 text-rose-405 border-rose-500/35 shadow-[0_0_8px_rgba(244,63,94,0.15)] font-black select-none'
+                                                       : 'bg-transparent text-zinc-550 border-transparent hover:text-zinc-355 select-none'
+                                                   }`}
+                                                   title="Rolar esta magia com Desvantagem"
+                                                 >
+                                                   Des
+                                                 </button>
+                                               </div>
+
                                                {/* Spell Roll Button */}
                                                <button
                                                  type="button"
@@ -2469,7 +2810,7 @@ export default function CharacterSheet() {
 
                       {activeTab === 'talents' && (
                         <div className="space-y-6">
-                          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-3">
                             <div>
                               <h3 className="text-sm font-black uppercase text-white tracking-widest flex items-center gap-1.5">
                                 <Award className="text-amber-500" size={16} /> Meus Talentos
@@ -2478,14 +2819,32 @@ export default function CharacterSheet() {
                                 Habilidades especiais e talentos de sua classe
                               </p>
                             </div>
-                            {getTalents().some(t => t.hasUses) && (
+                            <div className="flex flex-wrap items-center gap-2">
                               <button
-                                onClick={resetAllTalents}
-                                className="text-[9px] uppercase font-black text-amber-500 border border-amber-500/20 px-3 py-1.5 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 transition-all hover:border-amber-500/30 flex items-center gap-1.5 cursor-pointer"
+                                onClick={() => setIsRollConfirmOpen(true)}
+                                className="text-[9px] uppercase font-black text-rose-500 border border-rose-500/20 px-3 py-1.5 rounded-xl bg-rose-500/5 hover:bg-rose-500/10 transition-all hover:border-rose-500/30 flex items-center gap-1.5 cursor-pointer"
                               >
-                                <Zap size={10} /> Restaurar Usos
+                                <Sparkles size={10} /> Adquirir Talento
                               </button>
-                            )}
+
+                              {isGM && (
+                                <button
+                                  onClick={() => setIsGMAddTalentOpen(true)}
+                                  className="text-[9px] uppercase font-black text-violet-400 border border-violet-500/20 px-3 py-1.5 rounded-xl bg-violet-500/5 hover:bg-violet-500/10 transition-all hover:border-violet-500/30 flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Plus size={10} /> Mestre: Add Manual
+                                </button>
+                              )}
+
+                              {getTalents().some(t => t.hasUses) && (
+                                <button
+                                  onClick={resetAllTalents}
+                                  className="text-[9px] uppercase font-black text-amber-500 border border-amber-500/20 px-3 py-1.5 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 transition-all hover:border-amber-500/30 flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Zap size={10} /> Restaurar Usos
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {getTalents().length === 0 ? (
@@ -2501,12 +2860,40 @@ export default function CharacterSheet() {
                                 return (
                                   <div 
                                     key={talent.name}
-                                    className="bg-zinc-900 border border-zinc-850 p-5 rounded-[24px] flex flex-col justify-between gap-4 hover:border-zinc-800 transition-all"
+                                    className="bg-zinc-900 border border-zinc-850 p-5 rounded-[24px] flex flex-col justify-between gap-4 hover:border-zinc-800 transition-all relative group"
                                   >
-                                    <div className="space-y-1.5">
+                                    <div className="space-y-1.5 pr-6">
+                                      <div className="flex flex-wrap gap-1.5 items-center mb-1">
+                                        {talent.type === 'initial' && (
+                                          <span className="text-[7px] tracking-wider font-extrabold uppercase px-1.5 py-0.5 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded">
+                                            Talento Inicial
+                                          </span>
+                                        )}
+                                        {talent.type === 'level' && (
+                                          <span className="text-[7px] tracking-wider font-extrabold uppercase px-1.5 py-0.5 bg-violet-500/10 text-violet-400 border border-violet-500/20 rounded">
+                                            Talento de Nível
+                                          </span>
+                                        )}
+                                        {talent.type === 'ancestry' && (
+                                          <span className="text-[7px] tracking-wider font-extrabold uppercase px-1.5 py-0.5 bg-teal-500/10 text-teal-400 border border-teal-500/20 rounded">
+                                            Talento de Ancestralidade
+                                          </span>
+                                        )}
+                                      </div>
+
                                       <h4 className="font-extrabold text-white text-sm uppercase italic tracking-wide">{talent.name}</h4>
                                       <p className="text-xs text-zinc-400 leading-relaxed">{talent.description}</p>
                                     </div>
+
+                                    {talent.isCustom && isGM && (
+                                      <button 
+                                        onClick={() => handleDeleteTalent(talent.name)}
+                                        className="absolute right-4 top-4 p-1 rounded-md text-rose-500 hover:text-rose-400 hover:bg-rose-500/5 border border-transparent hover:border-rose-500/10 transition-all cursor-pointer"
+                                        title="Mestre: Excluir Talento"
+                                      >
+                                        <X size={14} />
+                                      </button>
+                                    )}
 
                                     {talent.hasUses && (
                                       <div className="border-t border-zinc-800/60 pt-3 flex items-center justify-between">
@@ -2569,12 +2956,259 @@ export default function CharacterSheet() {
                         </div>
                       )}
 
-                      {activeTab === 'extra' && (
-                        <div className="h-full flex flex-col items-center justify-center text-zinc-700 py-32 space-y-4">
-                           <Zap size={48} className="opacity-10" />
-                           <p className="text-[10px] uppercase font-black tracking-[0.3em]">Recursos Adicionais em breve</p>
-                        </div>
-                      )}
+                      {activeTab === 'extra' && (() => {
+                        const BUILT_IN_CLASSES: Record<string, {
+                          hd: string;
+                          weapons: string;
+                          armors: string;
+                          isSpellcaster: boolean;
+                          spellsTable?: { level: number; tiers: number[] }[];
+                        }> = {
+                          guerreiro: {
+                            hd: "1d8",
+                            weapons: "Todas as armas comuns e marciais (adagas, espadas, machados, arcos, etc.)",
+                            armors: "Todas as armaduras e escudos",
+                            isSpellcaster: false,
+                          },
+                          sacerdote: {
+                            hd: "1d6",
+                            weapons: "Clava, maça, carrilhão/bastão, cajado, lança, funda",
+                            armors: "Armaduras leves, armaduras médias e escudos",
+                            isSpellcaster: true,
+                            spellsTable: [
+                              { level: 1, tiers: [2, 0, 0, 0, 0] },
+                              { level: 2, tiers: [3, 0, 0, 0, 0] },
+                              { level: 3, tiers: [3, 1, 0, 0, 0] },
+                              { level: 4, tiers: [3, 2, 0, 0, 0] },
+                              { level: 5, tiers: [3, 2, 1, 0, 0] },
+                              { level: 6, tiers: [3, 2, 2, 0, 0] },
+                              { level: 7, tiers: [3, 2, 2, 1, 0] },
+                              { level: 8, tiers: [3, 2, 2, 2, 0] },
+                              { level: 9, tiers: [3, 2, 2, 2, 1] },
+                              { level: 10, tiers: [3, 2, 2, 2, 2] },
+                            ]
+                          },
+                          mago: {
+                            hd: "1d4",
+                            weapons: "Adaga, cajado",
+                            armors: "Nenhuma armadura ou escudo",
+                            isSpellcaster: true,
+                            spellsTable: [
+                              { level: 1, tiers: [3, 0, 0, 0, 0] },
+                              { level: 2, tiers: [4, 0, 0, 0, 0] },
+                              { level: 3, tiers: [4, 1, 0, 0, 0] },
+                              { level: 4, tiers: [4, 2, 0, 0, 0] },
+                              { level: 5, tiers: [4, 2, 1, 0, 0] },
+                              { level: 6, tiers: [4, 2, 2, 0, 0] },
+                              { level: 7, tiers: [4, 2, 2, 1, 0] },
+                              { level: 8, tiers: [4, 2, 2, 2, 0] },
+                              { level: 9, tiers: [4, 2, 2, 2, 1] },
+                              { level: 10, tiers: [4, 2, 2, 2, 2] },
+                            ]
+                          },
+                          ladino: {
+                            hd: "1d6",
+                            weapons: "Clava, adaga, besta de mão, adaga de arremesso, espada curta, espada longa, arco curto, funda",
+                            armors: "Armadura leve (couro)",
+                            isSpellcaster: false,
+                          },
+                          profanador: {
+                            hd: "1d8",
+                            weapons: "Todas as armas comuns e de duas mãos",
+                            armors: "Todas as armaduras e escudos",
+                            isSpellcaster: false,
+                          },
+                          bruxa: {
+                            hd: "1d4",
+                            weapons: "Adaga, cajado, chicote, maça de mão",
+                            armors: "Nenhuma armadura ou escudo",
+                            isSpellcaster: true,
+                            spellsTable: [
+                              { level: 1, tiers: [2, 0, 0, 0, 0] },
+                              { level: 2, tiers: [3, 0, 0, 0, 0] },
+                              { level: 3, tiers: [3, 1, 0, 0, 0] },
+                              { level: 4, tiers: [3, 2, 0, 0, 0] },
+                              { level: 5, tiers: [3, 2, 1, 0, 0] },
+                              { level: 6, tiers: [3, 2, 2, 0, 0] },
+                              { level: 7, tiers: [3, 2, 2, 1, 0] },
+                              { level: 8, tiers: [3, 2, 2, 2, 0] },
+                              { level: 9, tiers: [3, 2, 2, 2, 1] },
+                              { level: 10, tiers: [3, 2, 2, 2, 2] },
+                            ]
+                          },
+                          "cavaleiro amaldiçoado": {
+                            hd: "1d8",
+                            weapons: "Todas as armas comuns e marciais",
+                            armors: "Todas as armaduras e escudos",
+                            isSpellcaster: true,
+                            spellsTable: [
+                              { level: 1, tiers: [1, 0, 0, 0, 0] },
+                              { level: 2, tiers: [2, 0, 0, 0, 0] },
+                              { level: 3, tiers: [2, 1, 0, 0, 0] },
+                              { level: 4, tiers: [2, 2, 0, 0, 0] },
+                              { level: 5, tiers: [2, 2, 1, 0, 0] },
+                              { level: 6, tiers: [2, 2, 2, 0, 0] },
+                              { level: 7, tiers: [2, 2, 2, 1, 0] },
+                              { level: 8, tiers: [2, 2, 2, 2, 0] },
+                              { level: 9, tiers: [2, 2, 2, 2, 1] },
+                              { level: 10, tiers: [2, 2, 2, 2, 2] },
+                            ]
+                          },
+                          duelista: {
+                            hd: "1d8",
+                            weapons: "Espada curta, florete, adaga, pistola, besta leve",
+                            armors: "Armaduras leves e médias",
+                            isSpellcaster: false,
+                          },
+                          bardo: {
+                            hd: "1d6",
+                            weapons: "Adaga, espada curta, florete, funda, arco curto",
+                            armors: "Armadura de couro",
+                            isSpellcaster: false,
+                          }
+                        };
+
+                        const lowerClass = character ? character.class.trim().toLowerCase() : '';
+                        const builtInClass = BUILT_IN_CLASSES[lowerClass];
+
+                        const classHD = currentClassDef?.hd || builtInClass?.hd || "1d6";
+                        const classWeapons = currentClassDef?.weapons || builtInClass?.weapons || currentClassDef?.weaponsArmor || "Adagas, espadas, cajados";
+                        const classArmors = currentClassDef?.armors?.join(", ") || builtInClass?.armors || "Armadura leve";
+                        const isCasterClass = currentClassDef?.isSpellcaster || builtInClass?.isSpellcaster || false;
+                        const talentsTableRows = getClassRollTable(character.class, currentClassDef || undefined);
+
+                        const spellsProgressionRows = [];
+                        if (isCasterClass) {
+                          if (currentClassDef?.spellsPerLevel) {
+                            for (let lvl = 1; lvl <= 10; lvl++) {
+                              const tiers = currentClassDef.spellsPerLevel[String(lvl)] || [0, 0, 0, 0, 0];
+                              spellsProgressionRows.push({ level: lvl, tiers });
+                            }
+                          } else if (builtInClass?.spellsTable) {
+                            spellsProgressionRows.push(...builtInClass.spellsTable);
+                          } else {
+                            spellsProgressionRows.push(
+                              { level: 1, tiers: [2, 0, 0, 0, 0] },
+                              { level: 2, tiers: [3, 0, 0, 0, 0] },
+                              { level: 3, tiers: [3, 1, 0, 0, 0] },
+                              { level: 4, tiers: [3, 2, 0, 0, 0] },
+                              { level: 5, tiers: [3, 2, 1, 0, 0] },
+                              { level: 6, tiers: [3, 2, 2, 0, 0] },
+                              { level: 7, tiers: [3, 2, 2, 1, 0] },
+                              { level: 8, tiers: [3, 2, 2, 2, 0] },
+                              { level: 9, tiers: [3, 2, 2, 2, 1] },
+                              { level: 10, tiers: [3, 2, 2, 2, 2] },
+                            );
+                          }
+                        }
+
+                        return (
+                          <div className="space-y-6 text-zinc-100">
+                            {/* Class identification card */}
+                            <div className="flex items-center gap-4 border-b border-zinc-800 pb-6">
+                              <div className="w-12 h-12 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-center text-amber-500">
+                                <Zap size={24} />
+                              </div>
+                              <div>
+                                <h2 className="text-xl font-black italic uppercase tracking-tighter text-white">Classe: {character.class}</h2>
+                                <p className="text-[10px] text-amber-500 font-extrabold uppercase tracking-widest mt-1">Informações básicas e progressão detalhada da classe</p>
+                              </div>
+                            </div>
+
+                            {/* Basic stats row */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-5 space-y-2">
+                                <div className="text-[9px] font-black uppercase text-amber-500 tracking-wider">Dado de Vida (HD)</div>
+                                <div className="text-2xl font-black italic text-zinc-100 tracking-tight">{classHD}</div>
+                              </div>
+                              <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-5 space-y-2 col-span-1 md:col-span-2">
+                                <div className="text-[9px] font-black uppercase text-amber-500 tracking-wider">Armas Permitidas</div>
+                                <div className="text-xs font-bold text-zinc-200 leading-relaxed">{classWeapons}</div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                              <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-5 space-y-2">
+                                <div className="text-[9px] font-black uppercase text-amber-500 tracking-wider">Armaduras e Escudos</div>
+                                <div className="text-xs font-bold text-zinc-200 leading-relaxed">{classArmors}</div>
+                              </div>
+                            </div>
+
+                            {/* Tabela de Talentos de Classe (Rolagens de Nível) */}
+                            <div className="space-y-3 pt-4">
+                              <h3 className="text-[12px] uppercase font-black tracking-widest text-zinc-100 border-l-2 border-amber-500 pl-3">Tabela de Talentos de Classe</h3>
+                              <div className="overflow-hidden border border-zinc-800 rounded-2xl bg-zinc-950/50">
+                                <table className="w-full border-collapse text-left">
+                                  <thead>
+                                    <tr className="border-b border-zinc-800 bg-zinc-900/80">
+                                      <th className="px-5 py-3 text-[9px] uppercase font-black text-zinc-400 tracking-wider w-24">Resultado (2d6)</th>
+                                      <th className="px-5 py-3 text-[9px] uppercase font-black text-zinc-400 tracking-wider">Efeito do Talento obtido</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-zinc-800/80">
+                                    {talentsTableRows.map((row, idx) => (
+                                      <tr key={idx} className="hover:bg-zinc-900/50 transition-all">
+                                        <td className="px-5 py-4 font-mono font-black text-amber-500 text-xs">
+                                          <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 px-2 py-1 rounded font-bold">
+                                            {row.range}
+                                          </span>
+                                        </td>
+                                        <td className="px-5 py-4 text-xs font-bold text-zinc-200 leading-relaxed">{row.effect}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* Tabela de Magias Conhecidas por Nível */}
+                            {isCasterClass && (
+                              <div className="space-y-3 pt-6">
+                                <h3 className="text-[12px] uppercase font-black tracking-widest text-zinc-100 border-l-2 border-violet-500 pl-3">Magias Conhecidas por Grau e Nível</h3>
+                                <div className="overflow-x-auto border border-zinc-800 rounded-2xl bg-zinc-950/50 no-scrollbar">
+                                  <table className="w-full border-collapse text-center min-w-[500px]">
+                                    <thead>
+                                      <tr className="border-b border-zinc-800 bg-zinc-900/80">
+                                        <th className="px-4 py-3 text-[9px] uppercase font-black text-zinc-400 tracking-wider text-left w-20 pl-6">Nível</th>
+                                        <th className="px-4 py-3 text-[9px] uppercase font-black text-violet-400 tracking-wider">M1 (Grau 1)</th>
+                                        <th className="px-4 py-3 text-[9px] uppercase font-black text-violet-400 tracking-wider">M2 (Grau 2)</th>
+                                        <th className="px-4 py-3 text-[9px] uppercase font-black text-violet-400 tracking-wider">M3 (Grau 3)</th>
+                                        <th className="px-4 py-3 text-[9px] uppercase font-black text-violet-400 tracking-wider">M4 (Grau 4)</th>
+                                        <th className="px-4 py-3 text-[9px] uppercase font-black text-violet-400 tracking-wider">M5 (Grau 5)</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-zinc-800/80">
+                                      {spellsProgressionRows.map((row) => (
+                                        <tr 
+                                          key={row.level} 
+                                          className={`transition-all hover:bg-violet-950/10 ${
+                                            character.level === row.level ? "bg-amber-500/10 border-y border-amber-500/20" : ""
+                                          }`}
+                                        >
+                                          <td className="px-4 py-4 text-xs font-black text-zinc-300 text-left pl-6">
+                                            {character.level === row.level ? (
+                                              <span className="text-amber-500 flex items-center gap-1.5">
+                                                Nível {row.level} <span className="text-[8px] bg-amber-500/20 px-1 py-0.5 rounded font-black uppercase text-amber-500">Atual</span>
+                                              </span>
+                                            ) : (
+                                              `Nível ${row.level}`
+                                            )}
+                                          </td>
+                                          <td className="px-4 py-4 text-xs font-mono text-zinc-200 font-extrabold">{row.tiers[0] > 0 ? `${row.tiers[0]}` : "-"}</td>
+                                          <td className="px-4 py-4 text-xs font-mono text-zinc-200 font-extrabold">{row.tiers[1] > 0 ? `${row.tiers[1]}` : "-"}</td>
+                                          <td className="px-4 py-4 text-xs font-mono text-zinc-200 font-extrabold">{row.tiers[2] > 0 ? `${row.tiers[2]}` : "-"}</td>
+                                          <td className="px-4 py-4 text-xs font-mono text-zinc-200 font-extrabold">{row.tiers[3] > 0 ? `${row.tiers[3]}` : "-"}</td>
+                                          <td className="px-4 py-4 text-xs font-mono text-zinc-200 font-extrabold">{row.tiers[4] > 0 ? `${row.tiers[4]}` : "-"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </motion.div>
                   </AnimatePresence>
                 </div>
@@ -2760,6 +3394,153 @@ export default function CharacterSheet() {
                     onClick={addCustomItemToInventory}
                     className="flex-[2] py-4 bg-amber-600 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl hover:bg-amber-500 transition-all disabled:opacity-50 disabled:grayscale"
                    >Criar Item</button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isEditItemModalOpen && editingItem && (
+          <div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center p-4">
+             <motion.div 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }} 
+               onClick={() => { setIsEditItemModalOpen(false); setEditingItem(null); }} 
+               className="absolute inset-0 bg-black/90 backdrop-blur-md" 
+             />
+             <motion.div 
+               initial={{ y: '100%', opacity: 0 }} 
+               animate={{ y: 0, opacity: 1 }} 
+               exit={{ y: '100%', opacity: 0 }} 
+               className="relative w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-t-[40px] sm:rounded-[40px] overflow-hidden flex flex-col"
+             >
+                <div className="p-8 border-b border-zinc-800 flex justify-between items-center">
+                  <div>
+                    <h2 className="text-xl font-black italic uppercase tracking-tighter text-white">Editar Item</h2>
+                    <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mt-1">Modificando apenas este item na ficha</p>
+                  </div>
+                  <button onClick={() => { setIsEditItemModalOpen(false); setEditingItem(null); }} className="p-2 bg-zinc-800 rounded-xl text-zinc-500 hover:text-white"><X size={20} /></button>
+                </div>
+
+                <div className="p-8 space-y-6 overflow-y-auto max-h-[60vh] no-scrollbar">
+                  {/* Name Input */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1 font-mono">Nome do Item</label>
+                    <input 
+                      type="text"
+                      maxLength={50}
+                      value={editingItem.name}
+                      onChange={(e) => setEditingItem(prev => prev ? { ...prev, name: e.target.value } : null)}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white font-bold outline-none focus:border-amber-500/55 transition-all text-sm"
+                    />
+                  </div>
+
+                  {/* Slots Input */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1 font-mono">Espaços Ocupados</label>
+                    <div className="flex items-center gap-4">
+                       <button 
+                        type="button"
+                        onClick={() => setEditingItem(prev => prev ? { ...prev, slots: Math.max(0, prev.slots - 1) } : null)}
+                        className="w-12 h-12 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white transition-all cursor-pointer"
+                       ><Minus size={18} /></button>
+                       <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl h-12 flex items-center justify-center text-xl font-black text-white italic">
+                         {editingItem.slots}
+                       </div>
+                       <button 
+                        type="button"
+                        onClick={() => setEditingItem(prev => prev ? { ...prev, slots: prev.slots + 1 } : null)}
+                        className="w-12 h-12 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white transition-all cursor-pointer"
+                       ><Plus size={18} /></button>
+                    </div>
+                  </div>
+
+                  {/* Conditional properties based on category */}
+                  {editingItem.category === 'Arma' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* Damage */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1 font-mono">Dano (Ex: 1d8)</label>
+                        <input 
+                          type="text"
+                          maxLength={20}
+                          value={editingItem.damage || ''}
+                          onChange={(e) => setEditingItem(prev => prev ? { ...prev, damage: e.target.value } : null)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white font-bold outline-none focus:border-amber-500/55 transition-all placeholder:text-zinc-700 text-sm"
+                        />
+                      </div>
+
+                      {/* Range */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1 font-mono">Alcance (Ex: Curto)</label>
+                        <input 
+                          type="text"
+                          maxLength={30}
+                          value={editingItem.range || ''}
+                          onChange={(e) => setEditingItem(prev => prev ? { ...prev, range: e.target.value } : null)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white font-bold outline-none focus:border-amber-500/55 transition-all placeholder:text-zinc-700 text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {(editingItem.category === 'Armadura' || editingItem.category === 'Escudo') && (
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1 font-mono">Classe de Armadura (CA)</label>
+                      <input 
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={editingItem.ac || 0}
+                        onChange={(e) => setEditingItem(prev => prev ? { ...prev, ac: parseInt(e.target.value) || 0 } : null)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white font-bold outline-none focus:border-amber-500/55 transition-all text-sm"
+                      />
+                    </div>
+                  )}
+
+                  {/* Modifiers */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 ml-1 font-mono">Modificadores / Propriedades</label>
+                    <input 
+                      type="text"
+                      maxLength={100}
+                      value={editingItem.modifiers || ''}
+                      onChange={(e) => setEditingItem(prev => prev ? { ...prev, modifiers: e.target.value } : null)}
+                      placeholder="Ex: Ágil, Discreta"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white font-bold outline-none focus:border-amber-500/55 transition-all placeholder:text-zinc-700 text-sm"
+                    />
+                  </div>
+
+                  {/* Description Input */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[10px] uppercase font-black tracking-widest text-zinc-500 font-mono">Descrição</label>
+                      <span className="text-[10px] font-black text-zinc-700">{(editingItem.description || '').length}/200</span>
+                    </div>
+                    <textarea 
+                      maxLength={200}
+                      value={editingItem.description || ''}
+                      onChange={(e) => setEditingItem(prev => prev ? { ...prev, description: e.target.value } : null)}
+                      placeholder="Descreva as propriedades do item..."
+                      className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-white font-medium outline-none focus:border-amber-500/55 transition-all placeholder:text-zinc-700 resize-none text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-8 border-t border-zinc-800 bg-zinc-950/50 flex gap-4">
+                   <button 
+                    type="button"
+                    onClick={() => { setIsEditItemModalOpen(false); setEditingItem(null); }}
+                    className="flex-1 py-4 bg-zinc-900 border border-zinc-800 text-zinc-400 font-black uppercase text-[10px] tracking-widest rounded-2xl hover:text-white transition-all cursor-pointer"
+                   >Cancelar</button>
+                   <button 
+                    type="button"
+                    disabled={!editingItem.name}
+                    onClick={saveEditedItem}
+                    className="flex-[2] py-4 bg-amber-600 text-white font-black uppercase text-[10px] tracking-widest rounded-2xl hover:bg-amber-500 transition-all disabled:opacity-50 disabled:grayscale cursor-pointer"
+                   >Salvar Alterações</button>
                 </div>
              </motion.div>
           </div>
@@ -2976,6 +3757,193 @@ export default function CharacterSheet() {
                 </div>
                 <button onClick={() => setHealingAfflictionId(null)} className="w-full py-4 text-center text-zinc-500 font-bold uppercase text-[10px] tracking-widest">Cancelar</button>
              </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isRollConfirmOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 p-8 rounded-[32px] max-w-sm w-full space-y-6 text-center shadow-2xl"
+            >
+              <div className="mx-auto w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500">
+                <Sparkles size={24} />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-black italic text-white uppercase tracking-tighter">Adquirir Talento?</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Confirme para rolar <strong className="text-white">2d6</strong> e selecionar automaticamente o talento correspondente da tabela para o seu personagem.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsRollConfirmOpen(false)}
+                  className="py-3.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white font-black uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAcquireTalentRoll}
+                  className="py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black uppercase text-[10px] tracking-widest rounded-xl shadow-lg hover:shadow-rose-600/20 transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  Rolar 2D6
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isRollResultOpen && rollResult && (
+          <div className="fixed inset-0 z-[210] flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 p-8 rounded-[32px] max-w-md w-full text-center shadow-2xl space-y-6 relative overflow-hidden"
+            >
+              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-500 via-violet-500 to-rose-500" />
+              
+              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-500">Dados Rolados!</div>
+              
+              <div className="flex items-center justify-center gap-4 py-2">
+                <div className="w-14 h-14 bg-zinc-950 border-2 border-zinc-800 text-white flex items-center justify-center text-2xl font-black rounded-2xl shadow-inner font-mono">
+                  {rollResult.d1}
+                </div>
+                <div className="text-zinc-500 text-lg font-black font-mono">+</div>
+                <div className="w-14 h-14 bg-zinc-950 border-2 border-zinc-800 text-white flex items-center justify-center text-2xl font-black rounded-2xl shadow-inner font-mono">
+                  {rollResult.d2}
+                </div>
+                <div className="text-zinc-500 text-lg font-black font-mono">=</div>
+                <div className="w-16 h-16 bg-amber-500 text-black flex items-center justify-center text-3xl font-black rounded-2xl shadow-lg font-mono">
+                  {rollResult.sum}
+                </div>
+              </div>
+
+              <div className="space-y-3 bg-zinc-950 border border-zinc-850 p-6 rounded-2xl text-left">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[8px] font-extrabold uppercase bg-violet-500/10 text-violet-400 border border-violet-500/20 px-1.5 py-0.5 rounded">
+                    Talento Adquirido
+                  </span>
+                  <span className="text-[8px] font-mono font-bold text-zinc-550">Tabela de Nível</span>
+                </div>
+                <h4 className="text-lg font-black uppercase italic tracking-wide text-white">
+                  Talento de Nível (Soma: {rollResult.sum})
+                </h4>
+                <p className="text-xs text-zinc-300 leading-relaxed font-semibold">
+                  {rollResult.effect}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsRollResultOpen(false)}
+                className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-black font-black uppercase text-xs tracking-widest rounded-xl transition-all active:scale-[0.98] shadow-lg shadow-amber-500/15 cursor-pointer"
+              >
+                Excelente!
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isGMAddTalentOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 p-8 rounded-[32px] max-w-md w-full shadow-2xl relative space-y-5"
+            >
+              <div className="space-y-1">
+                <h3 className="text-xl font-black italic text-white uppercase tracking-tighter">Mestre: Adicionar Talento</h3>
+                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Escolha um talento da tabela ou crie um customizado</p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[8px] uppercase font-black text-zinc-500 ml-0.5">Tipo/Tag do Talento</label>
+                  <select
+                    value={gmCustomType}
+                    onChange={(e) => setGmCustomType(e.target.value as any)}
+                    className="w-full bg-zinc-950 border border-zinc-805 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:border-violet-500/50"
+                  >
+                    <option value="level">Talento de Nível (Padrão)</option>
+                    <option value="initial">Talento Inicial</option>
+                    <option value="ancestry">Talento de Ancestralidade</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[8px] uppercase font-black text-zinc-500 ml-0.5">Opção da Tabela</label>
+                  <select
+                    value={gmSelectedTalentRow}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setGmSelectedTalentRow(val === 'custom' ? 'custom' : parseInt(val));
+                    }}
+                    className="w-full bg-zinc-950 border border-zinc-805 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:border-violet-500/50"
+                  >
+                    {getClassRollTable(character.class, currentClassDef || undefined).map((row, idx) => (
+                      <option key={idx} value={idx}>
+                        Soma {row.range}: {row.effect.length > 50 ? `${row.effect.substring(0, 50)}...` : row.effect}
+                      </option>
+                    ))}
+                    <option value="custom">Escrever Talento Completamente Personalizado</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[8px] uppercase font-black text-zinc-500 ml-0.5">Nome do Talento</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="E.g. Talento de Nível (Rolado: 7)"
+                    value={gmCustomName}
+                    onChange={(e) => setGmCustomName(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-805 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:border-violet-500/50"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[8px] uppercase font-black text-zinc-500 ml-0.5">Efeito/Descrição do Talento</label>
+                  <textarea
+                    required
+                    rows={3}
+                    placeholder="Escreva o efeito detalhado do talento."
+                    value={gmCustomDescription}
+                    onChange={(e) => setGmCustomDescription(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-805 rounded-lg px-3 py-2 text-xs font-semibold text-white outline-none focus:border-violet-500/50 resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGMAddTalentOpen(false)}
+                  className="py-3.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white font-black uppercase text-[10px] tracking-widest rounded-xl transition-all active:scale-95 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={!gmCustomName.trim() || !gmCustomDescription.trim()}
+                  onClick={handleGMAddTalent}
+                  className="py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-35 disabled:cursor-not-allowed text-white font-black uppercase text-[10px] tracking-widest rounded-xl shadow-lg transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  Adicionar
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>

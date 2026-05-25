@@ -23,7 +23,8 @@ import {
   deleteDoc, 
   query, 
   where, 
-  onSnapshot 
+  onSnapshot,
+  getDocs
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { CampaignNote, CampaignFolder } from '../../types';
@@ -53,8 +54,8 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
   const [notes, setNotes] = useState<CampaignNote[]>([]);
   const [folders, setFolders] = useState<CampaignFolder[]>([]);
 
-  // Filtering states
-  const [selectedFolderId, setSelectedFolderId] = useState<string | 'all' | 'none'>('all');
+  // Filtering states - activeFolderId replaces selectedFolderId
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchText, setSearchText] = useState<string>('');
 
@@ -76,7 +77,7 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
 
   const [viewingNote, setViewingNote] = useState<CampaignNote | null>(null);
 
-  // Load real-time data
+  // Load folders (always loaded)
   useEffect(() => {
     if (!campaignId) return;
 
@@ -90,21 +91,62 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
       setFolders(fList.sort((a, b) => a.createdAt - b.createdAt));
     }, (err) => console.error("Folders loaded error:", err));
 
-    // Real-time notes
-    const qNotes = query(collection(db, 'campaign_notes'), where('campaignId', '==', campaignId));
-    const unsubNotes = onSnapshot(qNotes, (snap) => {
-      const nList: CampaignNote[] = [];
-      snap.forEach(d => {
-        nList.push({ id: d.id, ...d.data() } as CampaignNote);
-      });
-      setNotes(nList.sort((a, b) => b.updatedAt - a.updatedAt));
-    }, (err) => console.error("Notes loaded error:", err));
-
     return () => {
       unsubFolders();
-      unsubNotes();
     };
   }, [campaignId]);
+
+  // Load notes on-demand based on active folder or universal search
+  useEffect(() => {
+    if (!campaignId) return;
+
+    let unsubNotes = () => {};
+
+    const isSearching = searchText.trim() !== '';
+
+    if (isSearching) {
+      // Load all notes of the campaign for universal search
+      const qNotes = query(collection(db, 'campaign_notes'), where('campaignId', '==', campaignId));
+      unsubNotes = onSnapshot(qNotes, (snap) => {
+        const nList: CampaignNote[] = [];
+        snap.forEach(d => {
+          nList.push({ id: d.id, ...d.data() } as CampaignNote);
+        });
+        setNotes(nList.sort((a, b) => b.updatedAt - a.updatedAt));
+      }, (err) => console.error("Notes loaded error:", err));
+    } else if (activeFolderId !== null) {
+      // Load notes of the active folder
+      let qNotes;
+      if (activeFolderId === 'unassigned') {
+        qNotes = query(
+          collection(db, 'campaign_notes'),
+          where('campaignId', '==', campaignId),
+          where('folderId', '==', null)
+        );
+      } else {
+        qNotes = query(
+          collection(db, 'campaign_notes'),
+          where('campaignId', '==', campaignId),
+          where('folderId', '==', activeFolderId)
+        );
+      }
+
+      unsubNotes = onSnapshot(qNotes, (snap) => {
+        const nList: CampaignNote[] = [];
+        snap.forEach(d => {
+          nList.push({ id: d.id, ...d.data() } as CampaignNote);
+        });
+        setNotes(nList.sort((a, b) => b.updatedAt - a.updatedAt));
+      }, (err) => console.error("Notes loaded error:", err));
+    } else {
+      // Top level overview (no folder selected, not searching): clear notes
+      setNotes([]);
+    }
+
+    return () => {
+      unsubNotes();
+    };
+  }, [campaignId, activeFolderId, searchText]);
 
   // Aggregate categories dynamically from all available notes
   const availableCategories = useMemo(() => {
@@ -125,16 +167,18 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
       // Category check
       if (selectedCategory !== 'all' && n.category !== selectedCategory) return false;
 
-      // Folder check
-      if (selectedFolderId === 'none') {
-        return !n.folderId;
-      } else if (selectedFolderId !== 'all') {
-        return n.folderId === selectedFolderId;
+      // Folder check (only applies if we are NOT searching)
+      if (searchText.trim() === '') {
+        if (activeFolderId === 'unassigned') {
+          return !n.folderId;
+        } else if (activeFolderId !== null) {
+          return n.folderId === activeFolderId;
+        }
       }
 
       return true;
     });
-  }, [notes, selectedFolderId, selectedCategory, searchText]);
+  }, [notes, activeFolderId, selectedCategory, searchText]);
 
   // Folder helper labels
   const folderMap = useMemo(() => {
@@ -150,7 +194,7 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
     setEditingNote(null);
     setNoteTitle('');
     setNoteContent('');
-    setNoteFolderId(selectedFolderId !== 'all' && selectedFolderId !== 'none' ? selectedFolderId : '');
+    setNoteFolderId(activeFolderId !== null && activeFolderId !== 'unassigned' ? activeFolderId : '');
     setNoteCategory('Geral');
     setIsNoteModalOpen(true);
   };
@@ -246,16 +290,23 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
   const handleDeleteFolder = async (fId: string) => {
     try {
       // Find notes locked in this folder, and detach them (set folderId to null)
-      const orphanNotes = notes.filter(n => n.folderId === fId);
-      for (const note of orphanNotes) {
-        await updateDoc(doc(db, 'campaign_notes', note.id), { folderId: null });
-      }
+      const qOrphans = query(
+        collection(db, 'campaign_notes'),
+        where('campaignId', '==', campaignId),
+        where('folderId', '==', fId)
+      );
+      const querySnap = await getDocs(qOrphans);
+      const batchPromises: Promise<any>[] = [];
+      querySnap.forEach((docSnap) => {
+        batchPromises.push(updateDoc(doc(db, 'campaign_notes', docSnap.id), { folderId: null }));
+      });
+      await Promise.all(batchPromises);
 
       // Delete the folder record
       await deleteDoc(doc(db, 'campaign_folders', fId));
       setFolderToDelete(null);
-      if (selectedFolderId === fId) {
-        setSelectedFolderId('all');
+      if (activeFolderId === fId) {
+        setActiveFolderId(null);
       }
     } catch (err) {
       console.error("Delete folder error:", err);
@@ -275,108 +326,8 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-8 text-zinc-100">
-      {/* LEFT COLUMN: Folders and Categories Sidebar */}
+      {/* LEFT COLUMN: Categories Sidebar */}
       <div className="md:col-span-3 space-y-6">
-        {/* Navigation Sidebar */}
-        <div className="bg-zinc-950/40 border border-zinc-900/80 p-5 rounded-3xl space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest flex items-center gap-2">
-              <Folder size={14} className="text-zinc-500" />
-              Pastas
-            </h3>
-            <button
-              onClick={openNewFolderModal}
-              className="p-1 h-6 w-6 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-amber-500 hover:bg-amber-500/10 flex items-center justify-center text-zinc-400 hover:text-amber-500 transition-all active:scale-95 cursor-pointer"
-              title="Nova Pasta de Anotações"
-            >
-              <FolderPlus size={12} />
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-1.5 max-h-[250px] overflow-y-auto scrollbar-hide pr-1">
-            <button
-              onClick={() => setSelectedFolderId('all')}
-              className={`w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-left text-xs font-black uppercase tracking-wider transition-all border ${
-                selectedFolderId === 'all'
-                  ? 'bg-amber-600/10 border-amber-500/30 text-amber-500'
-                  : 'bg-transparent border-transparent text-zinc-500 hover:bg-zinc-900/40 hover:text-zinc-300'
-              }`}
-            >
-              <BookOpen size={14} />
-              <span className="flex-1 truncate">Todas as Notas</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-600 font-bold leading-none">{notes.length}</span>
-            </button>
-
-            <button
-              onClick={() => setSelectedFolderId('none')}
-              className={`w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-left text-xs font-black uppercase tracking-wider transition-all border ${
-                selectedFolderId === 'none'
-                  ? 'bg-amber-600/10 border-amber-500/30 text-amber-500'
-                  : 'bg-transparent border-transparent text-zinc-500 hover:bg-zinc-900/40 hover:text-zinc-300'
-              }`}
-            >
-              <FileText size={14} />
-              <span className="flex-1 truncate">Sem Pasta</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-600 font-bold leading-none">
-                {notes.filter(n => !n.folderId).length}
-              </span>
-            </button>
-
-            <div className="h-px bg-zinc-900 my-1" />
-
-            {folders.map(f => {
-              const occurrences = notes.filter(n => n.folderId === f.id).length;
-              return (
-                <div
-                  key={f.id}
-                  onClick={() => setSelectedFolderId(f.id)}
-                  className={`w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-left text-xs font-bold transition-all border group/folder cursor-pointer ${
-                    selectedFolderId === f.id
-                      ? 'bg-amber-600/15 border-amber-500/30 text-amber-400 font-black'
-                      : 'bg-transparent border-transparent text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200'
-                  }`}
-                >
-                  <Folder size={14} className={selectedFolderId === f.id ? 'text-amber-500' : 'text-zinc-600 group-hover/folder:text-zinc-400'} />
-                  <span className="flex-1 truncate uppercase tracking-wide text-[11px] leading-tight pr-1">
-                    {f.name}
-                  </span>
-                  
-                  {/* Action buttons (only show hover on desktop/non-active states usually, clean implementation) */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => openEditFolderModal(e, f)}
-                      className="p-1 hover:bg-zinc-800 text-zinc-500 hover:text-amber-500 rounded transition-all cursor-pointer"
-                      title="Renomear Pasta"
-                    >
-                      <Edit3 size={10} />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFolderToDelete(f);
-                      }}
-                      className="p-1 hover:bg-zinc-800 text-zinc-500 hover:text-red-500 rounded transition-all cursor-pointer"
-                      title="Excluir Pasta"
-                    >
-                      <Trash2 size={10} />
-                    </button>
-                  </div>
-                  
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-600 font-bold font-mono group-hover/folder:hidden">
-                    {occurrences}
-                  </span>
-                </div>
-              );
-            })}
-
-            {folders.length === 0 && (
-              <p className="text-[10px] text-zinc-600 font-bold uppercase italic text-center py-4 tracking-wider leading-relaxed">
-                Nenhuma pasta criada. Use o ícone azul/amber acima para organizar suas anotações!
-              </p>
-            )}
-          </div>
-        </div>
-
         {/* Categories Sidebar Selection */}
         <div className="bg-zinc-950/40 border border-zinc-900/80 p-5 rounded-3xl space-y-4">
           <h3 className="text-[10px] uppercase font-black text-zinc-500 tracking-widest flex items-center gap-2">
@@ -418,7 +369,7 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
         </div>
       </div>
 
-      {/* RIGHT COLUMN: Notes Search and Grid */}
+      {/* RIGHT COLUMN: Notes Search, Folders and Grid */}
       <div className="md:col-span-9 space-y-6">
         {/* Action and Search Panel */}
         <div className="flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
@@ -434,106 +385,317 @@ export function CampaignNotesTab({ campaignId }: CampaignNotesTabProps) {
             />
           </div>
 
-          <button
-            onClick={openNewNoteModal}
-            className="bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black uppercase tracking-widest py-3 px-6 rounded-2xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Plus size={14} /> Nova Anotação
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={openNewFolderModal}
+              className="bg-zinc-900 border border-zinc-800 hover:border-amber-500 hover:bg-amber-500/10 text-zinc-300 hover:text-amber-500 text-[10px] font-black uppercase tracking-widest py-3 px-5 rounded-2xl transition-all shadow active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <FolderPlus size={14} /> Nova Pasta
+            </button>
+            <button
+              onClick={openNewNoteModal}
+              className="bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black uppercase tracking-widest py-3 px-5 rounded-2xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Plus size={14} /> Nova Nota
+            </button>
+          </div>
         </div>
 
-        {/* Notes Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredNotes.map(note => {
-            const theme = getTheme(note.category);
-            return (
-              <motion.div
-                key={note.id}
-                layout
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                onClick={() => setViewingNote(note)}
-                className="bg-zinc-900/30 border border-zinc-800/60 hover:border-zinc-700/85 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden group shadow-md transition-all h-[240px] hover:shadow-lg cursor-pointer hover:bg-zinc-900/40"
-              >
-                {/* Note metadata headers: Category and Folder */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${theme.labelBg} ${theme.text} border ${theme.border}`}>
-                    {note.category || 'Geral'}
-                  </span>
+        {/* If searching: show notes list regardless of folder borders */}
+        {searchText.trim() !== '' ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-zinc-400 text-xs font-bold uppercase tracking-wider">
+              <span>Resultados de busca para:</span>
+              <span className="text-amber-500">"{searchText}"</span>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredNotes.map(note => {
+                const theme = getTheme(note.category);
+                return (
+                  <motion.div
+                    key={note.id}
+                    layout
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    onClick={() => setViewingNote(note)}
+                    className="bg-zinc-900/30 border border-zinc-800/60 hover:border-zinc-700/85 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden group shadow-md transition-all h-[240px] hover:shadow-lg cursor-pointer hover:bg-zinc-900/40"
+                  >
+                    {/* Note metadata headers: Category and Folder */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${theme.labelBg} ${theme.text} border ${theme.border}`}>
+                        {note.category || 'Geral'}
+                      </span>
 
-                  {note.folderId && (
-                    <span className="text-[8px] font-mono font-black text-zinc-500 uppercase tracking-widest truncate max-w-[120px]" title={`Pasta: ${folderMap[note.folderId] || 'Geral'}`}>
-                      📁 {folderMap[note.folderId] || 'Local'}
-                    </span>
-                  )}
-                </div>
+                      <span className="text-[8px] font-mono font-black text-zinc-500 uppercase tracking-widest truncate max-w-[120px]" title={note.folderId ? `Pasta: ${folderMap[note.folderId] || ''}` : 'Sem pasta'}>
+                        📁 {note.folderId ? folderMap[note.folderId] || 'Local' : 'Sem pasta'}
+                      </span>
+                    </div>
 
-                {/* Title and Content */}
-                <div className="flex-1 flex flex-col gap-1.5 overflow-hidden">
-                  <h4 className="text-sm font-black italic uppercase tracking-tighter text-white truncate group-hover:text-amber-500 transition-colors">
-                    {note.title}
-                  </h4>
-                  <p className="text-[11px] text-zinc-400 font-bold leading-relaxed overflow-hidden text-ellipsis line-clamp-5 whitespace-pre-wrap">
-                    {note.content}
+                    {/* Title and Content */}
+                    <div className="flex-1 flex flex-col gap-1.5 overflow-hidden">
+                      <h4 className="text-sm font-black italic uppercase tracking-tighter text-white truncate group-hover:text-amber-500 transition-colors">
+                        {note.title}
+                      </h4>
+                      <p className="text-[11px] text-zinc-400 font-bold leading-relaxed overflow-hidden text-ellipsis line-clamp-5 whitespace-pre-wrap">
+                        {note.content}
+                      </p>
+                    </div>
+
+                    {/* Footer with actions and author stamp */}
+                    <div className="border-t border-zinc-900 pt-3 flex items-center justify-between gap-4 mt-auto" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5 min-w-0" title={`Por ${note.authorName} (${note.authorRole})`}>
+                        <div className="w-5 h-5 bg-zinc-950 border border-zinc-800 rounded-full flex items-center justify-center">
+                          <User size={10} className="text-zinc-600" />
+                        </div>
+                        <span className="text-[9px] text-zinc-500 font-bold truncate">
+                          {note.authorName}
+                          {note.authorRole === 'Mestre' && (
+                            <span className="text-amber-500 text-[8px] font-black font-mono ml-0.5 tracking-tight">[DM]</span>
+                          )}
+                        </span>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 text-zinc-500">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditNoteModal(note);
+                          }}
+                          className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-amber-500 rounded-lg transition-all active:scale-90 cursor-pointer"
+                          title="Editar Anotação"
+                        >
+                          <Edit3 size={11} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setNoteToDelete(note);
+                          }}
+                          className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-red-900/40 text-zinc-400 hover:text-red-500 rounded-lg transition-all active:scale-90 cursor-pointer"
+                          title="Excluir Anotação"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+
+              {filteredNotes.length === 0 && (
+                <div className="col-span-full py-16 flex flex-col items-center justify-center bg-zinc-950/20 border border-zinc-900 border-dashed rounded-3xl">
+                  <BookOpen size={36} className="text-zinc-800 mb-3" />
+                  <p className="text-xs font-black uppercase tracking-widest text-zinc-600 italic">
+                    Nenhuma anotação encontrada na busca
                   </p>
                 </div>
-
-                {/* Footer with actions and author stamp */}
-                <div className="border-t border-zinc-900 pt-3 flex items-center justify-between gap-4 mt-auto" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-1.5 min-w-0" title={`Por ${note.authorName} (${note.authorRole})`}>
-                    <div className="w-5 h-5 bg-zinc-950 border border-zinc-800 rounded-full flex items-center justify-center">
-                      <User size={10} className="text-zinc-600" />
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Normal folders-based navigation mode */
+          <div className="space-y-6">
+            {activeFolderId === null ? (
+              /* Folders Top Level List View */
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xs uppercase font-extrabold text-zinc-400 tracking-wider">
+                    Suas Pastas e Seções
+                  </h3>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {/* Folders List */}
+                  {folders.map(f => (
+                    <div
+                      key={f.id}
+                      onClick={() => setActiveFolderId(f.id)}
+                      className="bg-zinc-900/30 border border-zinc-800/60 hover:border-zinc-700/80 p-5 rounded-3xl flex flex-col justify-between relative overflow-hidden group shadow-md transition-all h-[180px] hover:shadow-lg cursor-pointer hover:bg-zinc-900/40"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl">
+                          <Folder size={24} />
+                        </div>
+                        {/* Folder Action buttons */}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={(e) => openEditFolderModal(e, f)}
+                            className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-amber-500 rounded-lg transition-all cursor-pointer"
+                            title="Renomear Pasta"
+                          >
+                            <Edit3 size={11} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFolderToDelete(f);
+                            }}
+                            className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-red-900/40 text-zinc-400 hover:text-red-500 rounded-lg transition-all cursor-pointer"
+                            title="Excluir Pasta"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-4">
+                        <h4 className="text-sm font-black uppercase tracking-wider text-white group-hover:text-amber-500 transition-colors truncate">
+                          {f.name}
+                        </h4>
+                        <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">
+                          Clique para ver as anotações
+                        </p>
+                      </div>
                     </div>
-                    <span className="text-[9px] text-zinc-500 font-bold truncate">
-                      {note.authorName}
-                      {note.authorRole === 'Mestre' && (
-                        <span className="text-amber-500 text-[8px] font-black font-mono ml-0.5 tracking-tight">[DM]</span>
-                      )}
-                    </span>
-                  </div>
+                  ))}
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 text-zinc-500">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEditNoteModal(note);
-                      }}
-                      className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-white rounded-lg transition-all active:scale-90 cursor-pointer"
-                      title="Editar Anotação"
-                    >
-                      <Edit3 size={11} />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNoteToDelete(note);
-                      }}
-                      className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-red-900/40 text-zinc-400 hover:text-red-500 rounded-lg transition-all active:scale-90 cursor-pointer"
-                      title="Excluir Anotação"
-                    >
-                      <Trash2 size={11} />
-                    </button>
+                  {/* Notas sem Pasta Card */}
+                  <div
+                    onClick={() => setActiveFolderId('unassigned')}
+                    className="bg-zinc-900/30 border border-zinc-800/60 border-dashed hover:border-zinc-750 p-5 rounded-3xl flex flex-col justify-between relative overflow-hidden group shadow-md transition-all h-[180px] hover:shadow-lg cursor-pointer hover:bg-zinc-900/40"
+                  >
+                    <div className="p-3 bg-zinc-800/20 border border-zinc-800 text-zinc-400 rounded-2xl w-fit">
+                      <FileText size={24} />
+                    </div>
+                    <div className="mt-4">
+                      <h4 className="text-sm font-black uppercase tracking-wider text-white group-hover:text-amber-400 transition-colors truncate">
+                        Sem Pasta
+                      </h4>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">
+                        Anotações avulsas e soltas
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </motion.div>
-            )})}
 
-          {filteredNotes.length === 0 && (
-            <div className="col-span-full py-16 flex flex-col items-center justify-center bg-zinc-950/20 border border-zinc-900 border-dashed rounded-3xl">
-              <BookOpen size={36} className="text-zinc-800 mb-3" />
-              <p className="text-xs font-black uppercase tracking-widest text-zinc-600 italic">
-                Nenhuma anotação encontrada neste filtro
-              </p>
-              <button
-                onClick={openNewNoteModal}
-                className="mt-3 text-[10px] font-black uppercase text-amber-500/80 hover:text-amber-500 tracking-wider flex items-center gap-1.5 transition-colors"
-              >
-                <Plus size={12} /> Começar Bloco de Notas
-              </button>
-            </div>
-          )}
-        </div>
+                {folders.length === 0 && (
+                  <div className="py-12 flex flex-col items-center justify-center bg-zinc-950/20 border border-zinc-900 border-dashed rounded-3xl mt-2 text-center px-4">
+                    <FolderPlus size={32} className="text-zinc-800 mb-3" />
+                    <p className="text-xs font-black uppercase tracking-widest text-zinc-500 italic max-w-sm leading-relaxed">
+                      Crie pastas para organizar suas anotações corporativas, lore de Phandalin e monstros!
+                    </p>
+                    <button
+                      onClick={openNewFolderModal}
+                      className="mt-3 text-[10px] font-black uppercase text-amber-500/80 hover:text-amber-500 tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Plus size={12} /> Criar a Primeira Pasta
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Inside Selected Folder View */
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-900/80 pb-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveFolderId(null)}
+                      className="text-[10px] font-black uppercase text-zinc-500 hover:text-amber-500 bg-zinc-900/45 hover:bg-zinc-900 border border-zinc-800 hover:border-amber-500/40 px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      ← Voltar para as Pastas
+                    </button>
+                    
+                    <span className="text-zinc-600 font-bold text-xs uppercase">/</span>
+                    
+                    <div className="flex items-center gap-1.5 text-xs text-white uppercase tracking-wider font-extrabold italic">
+                      📁 {activeFolderId === 'unassigned' ? 'Anotações Sem Pasta' : folderMap[activeFolderId]}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Notes Grid of this specific folder */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filteredNotes.map(note => {
+                    const theme = getTheme(note.category);
+                    return (
+                      <motion.div
+                        key={note.id}
+                        layout
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => setViewingNote(note)}
+                        className="bg-zinc-900/30 border border-zinc-800/60 hover:border-zinc-700/85 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden group shadow-md transition-all h-[240px] hover:shadow-lg cursor-pointer hover:bg-zinc-900/40"
+                      >
+                        {/* Note metadata headers: Category and Folder */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${theme.labelBg} ${theme.text} border ${theme.border}`}>
+                            {note.category || 'Geral'}
+                          </span>
+                        </div>
+
+                        {/* Title and Content */}
+                        <div className="flex-1 flex flex-col gap-1.5 overflow-hidden">
+                          <h4 className="text-sm font-black italic uppercase tracking-tighter text-white truncate group-hover:text-amber-500 transition-colors">
+                            {note.title}
+                          </h4>
+                          <p className="text-[11px] text-zinc-400 font-bold leading-relaxed overflow-hidden text-ellipsis line-clamp-5 whitespace-pre-wrap">
+                            {note.content}
+                          </p>
+                        </div>
+
+                        {/* Footer with actions and author stamp */}
+                        <div className="border-t border-zinc-900 pt-3 flex items-center justify-between gap-4 mt-auto" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1.5 min-w-0" title={`Por ${note.authorName} (${note.authorRole})`}>
+                            <div className="w-5 h-5 bg-zinc-950 border border-zinc-800 rounded-full flex items-center justify-center">
+                              <User size={10} className="text-zinc-600" />
+                            </div>
+                            <span className="text-[9px] text-zinc-500 font-bold truncate">
+                              {note.authorName}
+                              {note.authorRole === 'Mestre' && (
+                                <span className="text-amber-500 text-[8px] font-black font-mono ml-0.5 tracking-tight">[DM]</span>
+                              )}
+                            </span>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 text-zinc-500">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditNoteModal(note);
+                              }}
+                              className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-amber-500 rounded-lg transition-all active:scale-90 cursor-pointer"
+                              title="Editar Anotação"
+                            >
+                              <Edit3 size={11} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setNoteToDelete(note);
+                              }}
+                              className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-red-900/40 text-zinc-400 hover:text-red-500 rounded-lg transition-all active:scale-90 cursor-pointer"
+                              title="Excluir Anotação"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+
+                  {filteredNotes.length === 0 && (
+                    <div className="col-span-full py-16 flex flex-col items-center justify-center bg-zinc-950/20 border border-zinc-900 border-dashed rounded-3xl">
+                      <BookOpen size={36} className="text-zinc-800 mb-3" />
+                      <p className="text-xs font-black uppercase tracking-widest text-zinc-600 italic text-center px-4 leading-relaxed">
+                        Nenhuma anotação encontrada nesta pasta.
+                      </p>
+                      <button
+                        onClick={openNewNoteModal}
+                        className="mt-3 text-[10px] font-black uppercase text-amber-500/80 hover:text-amber-500 tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Plus size={12} /> Adicionar Nota Aqui
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* FORM MODAL: Create & Edit Note */}

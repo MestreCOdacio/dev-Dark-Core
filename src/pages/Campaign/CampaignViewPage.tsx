@@ -27,9 +27,10 @@ import {
   getDocs,
   setDoc,
   deleteDoc,
+  getDoc,
 } from "firebase/firestore";
 import { db } from "../../firebase";
-import { Campaign, CharacterState, RollLog, ATTR_LABELS } from "../../types";
+import { Campaign, CharacterState, RollLog, ATTR_LABELS, UserProfile } from "../../types";
 import { TRAITS_DATA } from "../../data/traits";
 import {
   sanitizeCharacter,
@@ -119,6 +120,37 @@ export function CampaignViewPage() {
   const [characters, setCharacters] = useState<CharacterState[]>([]);
   const [rolls, setRolls] = useState<RollLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [playerNicknames, setPlayerNicknames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!campaign?.playerIds || campaign.playerIds.length === 0) return;
+
+    let isMounted = true;
+    const fetchNicknames = async () => {
+      const nickMap: Record<string, string> = {};
+      try {
+        for (const pid of campaign.playerIds) {
+          const uSnap = await getDoc(doc(db, "users", pid));
+          if (uSnap.exists()) {
+            const data = uSnap.data();
+            nickMap[pid] = (data as UserProfile).nickname || pid;
+          } else {
+            nickMap[pid] = pid;
+          }
+        }
+        if (isMounted) {
+          setPlayerNicknames(prev => ({ ...prev, ...nickMap }));
+        }
+      } catch (err) {
+        console.error("Erro ao carregar apelidos dos jogadores:", err);
+      }
+    };
+
+    fetchNicknames();
+    return () => {
+      isMounted = false;
+    };
+  }, [campaign?.playerIds]);
 
   const [isAddingChars, setIsAddingChars] = useState(false);
   const [isAddingPlayers, setIsAddingPlayers] = useState(false);
@@ -840,7 +872,7 @@ export function CampaignViewPage() {
                             <User size={14} className="text-zinc-600" />
                           </div>
                           <span className="text-[10px] font-bold text-zinc-400 truncate max-w-[120px]">
-                            {pid}
+                            {playerNicknames[pid] || pid}
                           </span>
                         </div>
                         {mode === "gm" && (

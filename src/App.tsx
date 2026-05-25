@@ -756,23 +756,7 @@ function CharacterSheet({ charId, onBack, userProfile }: { charId: string, onBac
 
       updateCharacterInDB({ hp: updatedHP });
 
-      // Log Healing (Rest)
-      if (amount > 0 && newCurrent > oldHP) {
-        const healed = newCurrent - oldHP;
-        const rollRef = doc(collection(db, 'rolls'));
-        setDoc(rollRef, {
-          id: rollRef.id,
-          characterId: charId,
-          characterName: prev.name,
-          userId: prev.userId,
-          type: 'normal',
-          value: healed,
-          modifier: 0,
-          label: `Recuperou ${healed} PV (Descanso)`,
-          timestamp: Date.now(),
-          advantageMode: 'none'
-        }).catch(e => console.error("History log failed:", e));
-      }
+      
 
       return {
         ...prev,
