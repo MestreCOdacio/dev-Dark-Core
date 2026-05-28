@@ -13,11 +13,19 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [isGMMasterAuth, setIsGMMasterAuth] = useState(false);
   const [gmKey, setGmKey] = useState('');
+  const [error, setError] = useState('');
 
   const handleLogin = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
+    setError('');
     const cleanId = inputId.trim();
     if (!cleanId) return;
+
+    if (cleanId.toLowerCase() === 'mestre') {
+      setError('ID não encontrado');
+      return;
+    }
+
     setLoading(true);
     
     try {
@@ -28,14 +36,11 @@ export function LoginPage() {
         loginLegacy(cleanId);
         navigate('/');
       } else {
-        // Permite login com qualquer ID se não existir no DB (Cria na hora via AuthContext)
-        loginLegacy(cleanId);
-        navigate('/');
+        setError('ID não encontrado');
       }
     } catch (e) {
-      console.warn("Login Firestore check failed, bypassing for convenience:", e);
-      loginLegacy(cleanId);
-      navigate('/');
+      console.error("Login Firestore check failed:", e);
+      setError('ID não encontrado');
     } finally {
       setLoading(false);
     }
@@ -93,10 +98,18 @@ export function LoginPage() {
                 <input 
                   type="text" 
                   value={inputId}
-                  onChange={(e) => setInputId(e.target.value)}
+                  onChange={(e) => {
+                    setInputId(e.target.value);
+                    if (error) setError('');
+                  }}
                   placeholder="Ex: 182305"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-4 text-center font-mono text-2xl font-bold text-amber-500 outline-none focus:border-amber-500/50 transition-all shadow-inner"
+                  className={`w-full bg-zinc-950 border ${error ? 'border-red-500/50 focus:border-red-500' : 'border-zinc-800 focus:border-amber-500/50'} rounded-xl px-4 py-4 text-center font-mono text-2xl font-bold text-amber-500 outline-none transition-all shadow-inner`}
                 />
+                {error && (
+                  <p className="text-red-500 text-[10px] font-black uppercase tracking-wider text-center mt-1">
+                    {error}
+                  </p>
+                )}
               </div>
               <button 
                 disabled={loading}
