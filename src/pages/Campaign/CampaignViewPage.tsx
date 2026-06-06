@@ -1272,19 +1272,26 @@ export function CampaignViewPage() {
                             </svg>
                             <span className="relative z-10 text-xl font-mono font-black text-white tracking-tighter">
                               {(() => {
-                                const base =
-                                  ARMOR_VALUES[
-                                    char.armor.type as keyof typeof ARMOR_VALUES
-                                  ] || 10;
-                                const dexMod = getModifier(
-                                  char.attributes.DEX || 10,
+                                const dexMod = getModifier(char.attributes.DEX || 10);
+                                const equippedArmor = char.inventory?.find(
+                                  (i) => i.isEquipped && i.category === "Armadura",
                                 );
-                                const dexToAdd =
-                                  char.armor.type === "plate" ? 0 : dexMod;
-                                const shieldBonus = char.shield?.active ? 2 : 0;
+                                const equippedShield = char.inventory?.find(
+                                  (i) => i.isEquipped && i.category === "Escudo",
+                                );
+
+                                let baseAC = 10 + dexMod;
+                                if (equippedArmor) {
+                                  if (equippedArmor.sumDex) {
+                                    baseAC = (equippedArmor.ac || 10) + dexMod;
+                                  } else {
+                                    baseAC = equippedArmor.ac || 10;
+                                  }
+                                }
+
+                                const shieldBonus = equippedShield ? 2 : 0;
                                 return (
-                                  base +
-                                  dexToAdd +
+                                  baseAC +
                                   shieldBonus +
                                   (char.armor?.magicBonus || 0) +
                                   (char.shield?.magicBonus || 0)
