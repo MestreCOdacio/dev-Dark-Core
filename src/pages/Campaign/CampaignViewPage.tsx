@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -121,6 +121,14 @@ export function CampaignViewPage() {
   const [rolls, setRolls] = useState<RollLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [playerNicknames, setPlayerNicknames] = useState<Record<string, string>>({});
+
+  const filteredRolls = useMemo(() => {
+    return rolls.filter(
+      (l) =>
+        characters.some((c) => c.id === l.characterId) ||
+        l.characterId === `campaign-${campaignId}`,
+    );
+  }, [rolls, characters, campaignId]);
 
   useEffect(() => {
     if (!campaign?.playerIds || campaign.playerIds.length === 0) return;
@@ -515,25 +523,7 @@ export function CampaignViewPage() {
       },
     );
 
-    // 2. Real-time Characters
-    const qChars = query(
-      collection(db, "characters"),
-      where("campaignId", "==", campaignId),
-    );
-    const unsubChars = onSnapshot(
-      qChars,
-      (snap) => {
-        const chars: CharacterState[] = [];
-        snap.forEach((d) => {
-          chars.push(sanitizeCharacter(d.data(), d.id));
-        });
-        setCharacters(chars);
-        setLoading(false);
-      },
-      (err) => handleFirestoreError(err, OperationType.GET, "characters"),
-    );
-
-    // 3. Real-time Rolls
+    // 2. Real-time Rolls
     const qRolls = query(
       collection(db, "rolls"),
       where("timestamp", ">", Date.now() - 3600000), // Last hour
@@ -546,18 +536,12 @@ export function CampaignViewPage() {
           allLogs.push({ id: d.id, ...d.data() } as RollLog);
         });
 
-        const filtered = allLogs
-          .filter(
-            (l) =>
-              characters.some((c) => c.id === l.characterId) ||
-              l.characterId === `campaign-${campaignId}`,
-          )
-          .sort((a, b) => b.timestamp - a.timestamp);
+        const sorted = allLogs.sort((a, b) => b.timestamp - a.timestamp);
 
         let hasNew = false;
         if (!isFirstRollLoadRef.current) {
           const isRetracted = isSidebarCollapsedRef.current || mobileTabRef.current === "fichas";
-          filtered.forEach((roll) => {
+          sorted.forEach((roll) => {
             if (!seenRollIdsRef.current.has(roll.id)) {
               seenRollIdsRef.current.add(roll.id);
               if (isRetracted) {
@@ -566,13 +550,13 @@ export function CampaignViewPage() {
             }
           });
         } else {
-          filtered.forEach((roll) => {
+          sorted.forEach((roll) => {
             seenRollIdsRef.current.add(roll.id);
           });
           isFirstRollLoadRef.current = false;
         }
 
-        setRolls(filtered);
+        setRolls(sorted);
         if (hasNew) {
           setHasNewRolls(true);
         }
@@ -582,10 +566,45 @@ export function CampaignViewPage() {
 
     return () => {
       unsubCamp();
-      unsubChars();
       unsubRolls();
     };
-  }, [campaignId, characters.length]);
+  }, [campaignId]);
+
+  useEffect(() => {
+    // Validação de segurança: Garante que a campanha foi carregada
+    if (!campaign?.id) {
+      setCharacters([]);
+      return;
+    }
+
+    // Cria a referência da coleção e a query principal
+    const charactersRef = collection(db, "characters");
+    const q = query(charactersRef, where("campaignId", "==", campaign.id));
+
+    // Acopla o ouvinte em tempo real (onSnapshot)
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const listaAtualizada: CharacterState[] = [];
+
+        snapshot.forEach((doc) => {
+          // Extrai os dados e injeta o ID do documento
+          listaAtualizada.push(sanitizeCharacter(doc.data(), doc.id));
+        });
+
+        // Atualiza o estado do React imediatamente
+        setCharacters(listaAtualizada);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Erro de sincronização de personagens: ", error);
+        handleFirestoreError(error, OperationType.GET, "characters");
+      },
+    );
+
+    // Função de Limpeza (Cleanup): Desliga a escuta quando o componente morre
+    return () => unsubscribe();
+  }, [campaign?.id]);
 
   return (
     <div className="min-h-screen bg-[#0c0c0e] flex flex-col md:flex-row h-screen overflow-hidden">
@@ -712,13 +731,13 @@ export function CampaignViewPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {rolls.length === 0 && (
+                  {filteredRolls.length === 0 && (
                     <p className="text-zinc-700 text-[10px] uppercase font-bold text-center py-8 italic">
                       Sem registros
                     </p>
                   )}
                   <AnimatePresence mode="popLayout">
-                    {rolls.slice(0, 20).map((roll) => (
+                    {filteredRolls.slice(0, 20).map((roll) => (
                       <motion.div
                         key={roll.id}
                         initial={{ opacity: 0, x: -10 }}
@@ -1488,7 +1507,7 @@ export function CampaignViewPage() {
               : "text-zinc-500 hover:text-white"
           }`}
         >
-          Histórico ({rolls.length})
+          Histórico ({filteredRolls.length})
           {hasNewRolls && mobileTab === "fichas" && (
             <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-amber-500 rounded-full animate-pulse border-2 border-zinc-950" />
           )}
